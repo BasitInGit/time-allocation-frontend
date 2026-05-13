@@ -1,7 +1,9 @@
 import { diffDays } from "../utils/dateUtils";
 
+const ALL_CATEGORIES = ["Academic", "Health", "Leisure", "Work"];
+
 export function analyzeDeadlineLoadByCategory(deadlines, selectedDate) {
-  if (!selectedDate || !deadlines?.length) return {};
+  if (!selectedDate) return {};
 
   const categoryMap = {};
 
@@ -11,16 +13,13 @@ export function analyzeDeadlineLoadByCategory(deadlines, selectedDate) {
     const daysLeft = diffDays(dl.date, selectedDate);
     const duration = Number(dl.duration || 0);
 
-    if (!categoryMap[dl.category]) {
-      categoryMap[dl.category] = {
-        day1: 0,
-        day2: 0,
-        day3: 0,
-        day5: 0,
-      };
+    const key = dl.category;
+
+    if (!categoryMap[key]) {
+      categoryMap[key] = { day1: 0, day2: 0, day3: 0, day5: 0 };
     }
 
-    const cat = categoryMap[dl.category];
+    const cat = categoryMap[key];
 
     if (daysLeft <= 1) cat.day1 += duration;
     else if (daysLeft <= 2) cat.day2 += duration;
@@ -28,10 +27,16 @@ export function analyzeDeadlineLoadByCategory(deadlines, selectedDate) {
     else if (daysLeft <= 5) cat.day5 += duration;
   });
 
-  // 🔥 Convert into final result
   const results = {};
 
-  Object.entries(categoryMap).forEach(([category, data]) => {
+  ALL_CATEGORIES.forEach(category => {
+    const data = categoryMap[category] || {
+      day1: 0,
+      day2: 0,
+      day3: 0,
+      day5: 0,
+    };
+
     const total = data.day1 + data.day2 + data.day3 + data.day5;
 
     if (data.day1 > 8 || data.day2 > 15 || total > 20) {

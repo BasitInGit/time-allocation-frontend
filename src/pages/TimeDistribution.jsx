@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { useAppContext } from "../context/AppContext";
 import { PieChart, Pie, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
 
@@ -26,85 +26,103 @@ export default function TimeDistribution() {
     setIsDrawerOpen(true);
   };
 
-  const { timeDistribution, setTimeDistribution, getWeeklyActualDistribution, weekLabel } = useAppContext();
+  const { timeDistribution, updateTimeDistribution, getWeeklyActualDistribution, weekLabel } = useAppContext();
   
-  const [categories, setCategories] = useState([]);
+  const categories = useMemo(() => {
+    const source =
+      timeDistribution?.length
+        ? timeDistribution
+        : [
+            { name: "Academic", value: 25 },
+            { name: "Health", value: 25 },
+            { name: "Leisure", value: 25 },
+            { name: "Work", value: 25 },
+          ];
 
-useEffect(() => {
-  if (timeDistribution?.length) {
-    setCategories(timeDistribution);
-  } else {
-    setCategories([
-      { name: "Academic", value: 25, fill: "#6366F1" },
-      { name: "Health", value: 25, fill: "#10B981" },
-      { name: "Leisure", value: 25, fill: "#F59E0B" },
-      { name: "Work", value: 25, fill: "#14B8A6" },
+    return source.map((entry) => ({
+      ...entry,
+      fill:
+        CATEGORY_COLORS[entry.name] ||
+        "#9CA3AF",
+    }));
+  }, [timeDistribution]);
+
+  const total = draftCategories.reduce((sum, c) => sum + c.value, 0);
+  const isValidTotal = total === 100;
+
+  const target = categories;
+
+  const actualRaw = getWeeklyActualDistribution();
+  const actual = actualRaw?.length
+    ? actualRaw
+    : [];
+  const hasActual = actual.length > 0;
+
+  const addCategory = (name) => {
+    if (draftCategories.find((c) => c.name === name)) return;
+
+    setDraftCategories([
+      ...draftCategories,
+      {
+        name,
+        value: 0,
+        fill: CATEGORY_COLORS[name] || "#9CA3AF",
+      },
     ]);
-  }
-}, [timeDistribution]);
+  };
 
-const total = categories.reduce((sum, c) => sum + c.value, 0);
-const isValidTotal = total === 100;
-
-const target = categories;
-
-const actualRaw = getWeeklyActualDistribution();
-const actual = actualRaw?.length
-  ? actualRaw
-  : [];
-const hasActual = actual.length > 0;
-
-const addCategory = (name) => {
-  if (draftCategories.find((c) => c.name === name)) return;
-
-  setDraftCategories([
-    ...draftCategories,
-    {
-      name,
-      value: 0,
-      fill: CATEGORY_COLORS[name] || "#9CA3AF",
-    },
-  ]);
-};
-
-const removeCategory = (name) => {
-  const filtered = draftCategories.filter((c) => c.name !== name);
-  if (filtered.length === 0) return;
-  setDraftCategories(filtered);
-};
+  const removeCategory = (name) => {
+    const filtered = draftCategories.filter((c) => c.name !== name);
+    if (filtered.length === 0) return;
+    setDraftCategories(filtered);
+  };
 
   const updateValue = (index, value) => {
-  const updated = [...draftCategories];
-  updated[index] = {
-    ...updated[index],
-    value: Number(value),
+    const updated = [...draftCategories];
+    updated[index] = {
+      ...updated[index],
+      value: Number(value),
+    };
+    setDraftCategories(updated);
   };
-  setDraftCategories(updated);
-};
 
-  const handleSave = () => {
-  const total = draftCategories.reduce((sum, c) => sum + c.value, 0);
-  if (total !== 100) return;
+  const handleSave = async () => {
+    const total = draftCategories.reduce(
+      (sum, c) => sum + c.value,
+      0
+    );
 
-  setCategories(draftCategories);
-  setTimeDistribution(draftCategories);
-  setIsDrawerOpen(false);
-};
+    if (total !== 100) return;
 
-const handleCancel = () => {
-  setIsDrawerOpen(false);
-  setDraftCategories([]);
-};
+    try {
+      await updateTimeDistribution(
+        draftCategories.map(c => ({
+          id: c.id || crypto.randomUUID(),
+          name: c.name,
+          value: c.value
+        }))
+      );
+
+      setIsDrawerOpen(false);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCancel = () => {
+    setIsDrawerOpen(false);
+    setDraftCategories([]);
+  };
 
   const targetWithColors = target.map((entry) => ({
-  ...entry,
-  fill: CATEGORY_COLORS[entry.name] || "#9CA3AF",
-}));
+    ...entry,
+    fill: CATEGORY_COLORS[entry.name] || "#9CA3AF",
+  }));
 
-const actualWithColors = actual.map((entry) => ({
-  ...entry,
-  fill: CATEGORY_COLORS[entry.name] || "#9CA3AF",
-}));
+  const actualWithColors = actual.map((entry) => ({
+    ...entry,
+    fill: CATEGORY_COLORS[entry.name] || "#9CA3AF",
+  }));
   return (
     <div className="flex flex-col gap-6 overflow-y-auto">
       <div className="flex items-baseline justify-between mb-6">
@@ -289,7 +307,12 @@ const actualWithColors = actual.map((entry) => ({
         <div className="flex gap-3 mt-6">
           <button
             onClick={handleSave}
-            className="flex-1 bg-green-600 text-white p-2 rounded-xl"
+            disabled={!isValidTotal}
+            className={`flex-1 p-2 rounded-xl text-white ${
+              isValidTotal
+                ? "bg-green-600 hover:bg-green-700"
+                : "bg-gray-300 cursor-not-allowed"
+            }`}
           >
             Save
           </button>

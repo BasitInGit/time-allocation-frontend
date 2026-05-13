@@ -4,7 +4,7 @@ import { generateSchedule } from "../utils/Scheduler/schedulerEngine";
 import { useAppContext } from "../context/AppContext";
 import { analyzeDeadlineLoadByCategory } from "../utils/deadlineAnalyser";
 import { getLocalDateStr, normalizeDate } from "../utils/dateUtils";
-import {toMinutes} from "../utils/Scheduler/timeUtils";
+import {toMinutes, toTimeStr} from "../utils/Scheduler/timeUtils";
 import { getActualWeeklyDistribution2 } from "../utils/analytics";
 
 const INTENSITY_OPTIONS = ["Light", "Balanced", "Intense"];
@@ -27,13 +27,11 @@ export default function Generate() {
 
   const {
     tasks,
-    setTasks,
+    addTask,
     deadlines,
     timeDistribution,
     schedulePreferences,
     setSchedulePreferences,
-    generatedSchedule,
-    setGeneratedSchedule,
   } = useAppContext();
 
   const HOURS = Array.from({ length: 24 }, (_, i) => {
@@ -50,38 +48,45 @@ export default function Generate() {
   const [draftPreferences, setDraftPreferences] = useState([]);
 
   useEffect(() => {
-  if (schedulePreferences?.length) {
-    setDraftPreferences(schedulePreferences);
-  } else {
-    setDraftPreferences(DEFAULT_PREFS);
-  }
-}, [schedulePreferences]);
+    if (schedulePreferences?.length) {
+      setDraftPreferences(schedulePreferences);
+    } else {
+      setDraftPreferences(DEFAULT_PREFS);
+    }
+  }, [schedulePreferences]);
 
-const analysisByCategory = selectedDate
-  ? analyzeDeadlineLoadByCategory(deadlines, selectedDate)
-  : {};
+  const analysisByCategory = selectedDate
+    ? analyzeDeadlineLoadByCategory(deadlines, selectedDate)
+    : {};
 
-const updatePreference = (index, field, value) => {
-  const updated = [...draftPreferences];
-  updated[index] = {
-  ...updated[index],
-  [field]: value || "medium",
-};
-  setDraftPreferences(updated);
-};
+  const updatePreference = (index, field, value) => {
+    const updated = [...draftPreferences];
+    updated[index] = {
+    ...updated[index],
+    [field]: value || "medium",
+  };
+    setDraftPreferences(updated);
+  };
 
-const canSave = selectedDate && draftPreferences.length > 0;
+  const canSave = selectedDate && draftPreferences.length > 0;
 
-const handleSavePreferences = () => {
-  setSchedulePreferences(draftPreferences);
-};
+  const handleSavePreferences = () => {
+    setSchedulePreferences(draftPreferences);
 
-const [useExisting, setUseExisting] = useState(true);
+    setSavedMessage(true);
 
-const [loading, setLoading] = useState(false);
+    setTimeout(() => {
+      setSavedMessage(false);
+    }, 2000);
+  };
+
+  const [useExisting, setUseExisting] = useState(true);
+
+  const [loading, setLoading] = useState(false);
+  const [savedMessage, setSavedMessage] = useState(false);
 
   // ================= GENERATE =================
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (
       !selectedDate ||
       !startTime ||
@@ -98,20 +103,36 @@ const [loading, setLoading] = useState(false);
       ? tasks.filter(t =>normalizeDate(t.date) === normalizeDate(selectedDate))
       : [];
 
-    let distribution = null;
+    let distribution = [];
 
     if (useTargetDistribution && selectedDate) {
-      const actual = getActualWeeklyDistribution(tasks, selectedDate);
+      const actual = getActualWeeklyDistribution2(tasks, selectedDate);
 
-      distribution = timeDistribution.map(targetCat => {
+      const rawDistribution = timeDistribution.map(targetCat => {
+        const WEEKLY_HOURS = 7 * 24; 
+        const targetValue = (targetCat.value/100) * WEEKLY_HOURS;
         const actualMatch = actual.find(a => a.name === targetCat.name);
 
         return {
           category: targetCat.name,
-          delta: (targetCat.value || 0) - (actualMatch?.value || 0),
+          delta: (targetValue || 0) - (actualMatch?.value || 0),
         };
       });
+       
+      // clamp negatives
+      const clamped = rawDistribution.map(d => ({
+        ...d,
+        delta: Math.max(0, d.delta),
+      }));
+
+      const totalDelta = clamped.reduce((sum, d) => sum + d.delta, 0);
+
+      distribution = clamped.map(d => ({
+        category: d.category,
+        pressure: totalDelta > 0 ? d.delta / totalDelta : 0,
+      }));
     }
+
     const schedule = generateSchedule({
       date: selectedDate,
       startTime,
@@ -123,211 +144,325 @@ const [loading, setLoading] = useState(false);
       existingTasks,
     });
 
+    console.log("RAW SCHEDULE:", schedule);
+
     const generatedTasks = schedule.map((t, i) => ({
-      id: `gen-${i}-${t.date}-${t.start}`,
+      id: `gen-${i}-${selectedDate}-${t.start}`,
       title: t.name,
       category: t.category,
-      date: t.date,
+      date: selectedDate,
       time: toTimeStr(t.start),
       duration: t.duration,
       color: categoryColors[t.category] || "bg-gray-500",
       generated: true,
     }));
     
-    setTasks((prev) => [
-      ...prev.filter(t => !t.generated),
-      ...generatedTasks
-    ]);
+    for (const task of generatedTasks) {
+      await addTask(task);
+    }
 
     console.log("SCHEDULE OUTPUT:", schedule);
     console.log("ANALYSIS:", analysisByCategory);
+    console.log(getLocalDateStr());
 
     setLoading(false);
-    navigate("/calendar");
+    navigate("/calendar", {
+      state: { date: selectedDate }
+    });
   };
 
   // ================= UI =================
-  return (
-    <div className="flex-1 p-6">
-      <div className="max-w-2xl">
+return (
+  <div className="flex-1 p-6">
+    <div className="max-w-3xl mx-auto">
 
-        <h1 className="text-2xl font-bold mb-6">
-          Generate Schedule
-        </h1>
+      <h1 className="text-2xl font-bold mb-6">
+        Schedule Generator
+      </h1>
 
-        {/* DATE + TIME WINDOW */}
-        <div className="space-y-4 mb-8">
-          
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Select a date for schedule
-          </label>
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className={`border p-2 rounded w-full ${!selectedDate ? "text-gray-400" : ""}`}
-          />
+      {/* DATE + TIME WINDOW */}
+      <div className="bg-white rounded-2xl shadow-sm border p-6 mb-8">
 
-          <div className="flex gap-3">
-  
-            {/* START TIME */}
-            <select
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              className="border p-2 rounded w-full text-gray-700"
-            >
-              <option value="">Select start time</option>
-
-              {HOURS.map((h) => (
-                <option key={h} value={h}>
-                  {h}
-                </option>
-              ))}
-            </select>
-
-            {/* END TIME */}
-            <select
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-              className="border p-2 rounded w-full text-gray-700"
-            >
-              <option value="">Select end time</option>
-
-              {HOURS.filter(h => toMinutes(h) > toMinutes(startTime || "00:00")).map((h) => (
-                <option key={h} value={h}>
-                  {h}
-                </option>
-              ))}
-            </select>
-
-          </div>
-        </div>
-
-      {!selectedDate && (
-        <p className="text-sm text-gray-400 mb-3">
-          Select a date to configure preferences
-        </p>
-      )}
-        <h2 className="text-sm font-medium mb-3">
-          Category Preferences
+        <h2 className="text-lg font-semibold mb-5">
+          Schedule Setup
         </h2>
 
-        {draftPreferences.map((cat, index) => {
-          const analysis = analysisByCategory?.[cat.name] || {
-            recommendedIntensity: "Light",
-            warning: null,
-            totalHours: 0,
-          };
+        <div className="flex flex-col items-center gap-4">
 
-          return (
-            <div key={cat.name} className="py-4 border-b border-gray-100">
+          {/* DATE */}
+          <div className="w-full max-w-sm">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Select schedule date
+            </label>
 
-              <div className="flex items-center justify-between mb-3">
-                <p className="font-medium text-gray-800">{cat.name}</p>
-              </div>
+            <input
+              type="date"
+              value={selectedDate}
+              min={getLocalDateStr()}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className={`w-full border p-2 rounded-lg bg-white shadow-sm ${
+                !selectedDate ? "text-gray-400" : ""
+              }`}
+            />
+          </div>
 
-              {/* TIME OF DAY */}
-              <div className="space-y-2">
-  
-  {/* Time preference row */}
-  <div className="flex items-center justify-between">
-    <span className="text-sm text-gray-500">Time of day</span>
+          {/* TIME SELECTORS */}
+          <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
 
-    <select
-      value={cat.preferredTime || "any"}
-      disabled={!selectedDate}
-      onChange={(e) =>
-        updatePreference(index, "preferredTime", e.target.value)
-      }
-      className="border rounded px-2 py-1 text-sm"
-    >
-      <option value="morning">Morning</option>
-      <option value="afternoon">Afternoon</option>
-      <option value="evening">Evening</option>
-      <option value="any">Any</option>
-    </select>
-  </div>
+            {/* START TIME */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Start
+              </label>
 
-  {/* Intensity row */}
-  <div className="flex items-center justify-between">
-    <span className="text-sm text-gray-500">Intensity</span>
+              <select
+                value={startTime}
+                disabled={!selectedDate}
+                onChange={(e) => setStartTime(e.target.value)}
+                className={`w-full border p-2 rounded-lg bg-white shadow-sm ${
+                  !selectedDate
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                    : "text-gray-700"
+                }`}
+              >
+                <option value="">Select</option>
 
-    <select
-      value={cat.intensity || "medium"}
-      disabled={!selectedDate}
-      onChange={(e) =>
-        updatePreference(index, "intensity", e.target.value)
-      }
-      className="border rounded px-2 py-1 text-sm"
-    >
-      <option value="low">Low</option>
-      <option value="medium">Medium</option>
-      <option value="high">High</option>
-    </select>
-  </div>
+                {HOURS.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-</div>
+            {/* END TIME */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                End
+              </label>
 
-              {/* RECOMMENDATION */}
-              {analysis && (
-                <p className="text-xs text-indigo-600 mt-2">
-                  Recommended: {analysis.recommendedIntensity}
+              <select
+                value={endTime}
+                disabled={!startTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                className={`w-full border p-2 rounded-lg bg-white shadow-sm ${
+                  !startTime
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                    : "text-gray-700"
+                }`}
+              >
+                <option value="">Select</option>
+
+                {HOURS.filter(
+                  h => toMinutes(h) > toMinutes(startTime || "00:00")
+                ).map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+          </div>
+
+          {/* helper text */}
+          {!selectedDate && (
+            <p className="text-sm text-gray-400">
+              Select a date first
+            </p>
+          )}
+
+          {selectedDate && !startTime && (
+            <p className="text-sm text-gray-400">
+              Select a start time
+            </p>
+          )}
+
+          {startTime && !endTime && (
+            <p className="text-sm text-gray-400">
+              Select an end time
+            </p>
+          )}
+
+        </div>
+      </div>
+
+      {/* FLOW CONTROL */}
+      {selectedDate &&
+        startTime &&
+        endTime &&
+        toMinutes(endTime) > toMinutes(startTime) && (
+        <>
+
+          {/* CATEGORY PREFERENCES */}
+          <div className="bg-white rounded-2xl shadow-sm border p-6 mb-6">
+
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold">
+                Category Preferences
+              </h2>
+            </div>
+
+            {draftPreferences.map((cat, index) => {
+              const analysis = analysisByCategory?.[cat.name] || {
+                recommendedIntensity: "",
+                warning: null,
+                totalHours: 0,
+              };
+
+              return (
+                <div
+                  key={cat.name}
+                  className="py-4 border-b border-gray-100 last:border-b-0"
+                >
+
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="font-medium text-gray-800">
+                      {cat.name}
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+
+                    {/* TIME OF DAY */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-500">
+                        Time of day
+                      </span>
+
+                      <select
+                        value={cat.preferredTime || "any"}
+                        onChange={(e) =>
+                          updatePreference(
+                            index,
+                            "preferredTime",
+                            e.target.value
+                          )
+                        }
+                        className="border rounded-lg px-3 py-1.5 text-sm bg-white"
+                      >
+                        <option value="morning">Morning</option>
+                        <option value="afternoon">Afternoon</option>
+                        <option value="evening">Evening</option>
+                        <option value="any">Any</option>
+                      </select>
+                    </div>
+
+                    {/* INTENSITY */}
+                    {cat.name !== "Leisure" && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-500">
+                          Intensity
+                        </span>
+
+                        <select
+                          value={cat.intensity || "medium"}
+                          onChange={(e) =>
+                            updatePreference(index, "intensity", e.target.value)
+                          }
+                          className="border rounded-lg px-3 py-1.5 text-sm bg-white"
+                        >
+                          <option value="low">Low</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* RECOMMENDATION */}
+                  {cat.name !== "Leisure" && analysis && (
+                    <p className="text-xs text-indigo-600 mt-2">
+                      Recommended: {analysis.recommendedIntensity}
+                    </p>
+                  )}
+                  {/* WARNING */}
+                  {analysis?.warning && (
+                    <p className="text-xs text-red-500">
+                      ⚠️ {analysis.warning}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+
+            <div className="mt-5 flex flex-col items-start gap-2">
+              <button
+                onClick={handleSavePreferences}
+                disabled={!canSave}
+                className={`px-4 py-2 rounded-lg text-white transition ${
+                  canSave
+                    ? "bg-green-600 hover:bg-green-700"
+                    : "bg-gray-400 cursor-not-allowed"
+                }`}
+              >
+                Save Preferences
+              </button>
+
+              {savedMessage && (
+                <p className="text-sm text-green-600">
+                  ✓ Preferences saved
                 </p>
               )}
+            </div>
+            
+          </div>
 
-              {/* WARNING */}
-              {analysis?.warning && (
-                <p className="text-xs text-red-500">
-                  ⚠️ {analysis.warning}
-                </p>
-              )}
+          {/* GENERATION OPTIONS */}
+          <div className="bg-white rounded-2xl shadow-sm border p-6 mb-6">
+
+            <h2 className="text-lg font-semibold mb-4">
+              Generation Options
+            </h2>
+
+            <div className="space-y-4">
+
+              {/* EXISTING TASKS */}
+              <label className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={useExisting}
+                  onChange={() => setUseExisting(!useExisting)}
+                />
+
+                <span className="text-sm text-gray-700">
+                  Use existing calendar tasks
+                </span>
+              </label>
+
+              {/* TARGET DISTRIBUTION */}
+              <label className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={useTargetDistribution}
+                  onChange={() =>
+                    setUseTargetDistribution(!useTargetDistribution)
+                  }
+                />
+
+                <span className="text-sm text-gray-700">
+                  Aim for target distribution
+                </span>
+              </label>
 
             </div>
-          );
-        })}
+          </div>
 
-        <button
-          onClick={handleSavePreferences}
-          disabled={!canSave}
-          className={`mb-6 px-4 py-2 rounded text-white ${
-            canSave ? "bg-green-600" : "bg-gray-400 cursor-not-allowed"
-          }`}
-        >
-          Save Preferences
-        </button>
-        
-        {/* EXISTING TASKS TOGGLE */}
-        <div className="mb-6 flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={useExisting}
-            onChange={() => setUseExisting(!useExisting)}
-          />
-          <span className="text-sm text-gray-600">
-            Use existing calendar tasks
-          </span>
-        </div>
+          {/* GENERATE BUTTON */}
+          <div className="flex justify-end">
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm transition"
+            >
+              {loading ? "Generating..." : "Generate Schedule"}
+            </button>
+          </div>
 
-        <div className="mb-6 flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={useTargetDistribution}
-            onChange={() => setUseTargetDistribution(!useTargetDistribution)}
-          />
-          <span className="text-sm text-gray-600">
-            Aim for target distribution
-          </span>
-        </div>
+        </>
+      )}
 
-        {/* GENERATE BUTTON */}
-        <button
-          onClick={handleGenerate}
-          disabled={loading}
-          className="px-5 py-2 bg-indigo-600 text-white rounded-lg"
-        >
-          {loading ? "Generating..." : "Generate Schedule"}
-        </button>
-      </div>
     </div>
-  );
+  </div>
+);
 }

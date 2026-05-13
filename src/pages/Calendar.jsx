@@ -1,21 +1,32 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useAppContext } from "../context/AppContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { getLocalDateStr, normalizeDate } from "../utils/dateUtils";
 import { toHours, toTimeStr, normalizeTime } from "../utils/Scheduler/timeUtils";
 
 function Calendar() {
-  const [selectedDate, setSelectedDate] = useState(getLocalDateStr());
+
+  // UI STATE
+  const location = useLocation();
+
+  const [selectedDate, setSelectedDate] = useState(
+    location.state?.date || getLocalDateStr()
+  );
+
+  const [showModal, setShowModal] = useState(false);
+  const [selectedTask, setSelectedTask] = useState(null);
 
   const navigate = useNavigate();
   const scrollRef = useRef(null);
   const [showAbove, setShowAbove] = useState(false);
   const [showBelow, setShowBelow] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-  
 
+  
+  
+  // DATA (from context)
   const { tasks, defaultTask, addTask, updateTask, deleteTask: deleteGlobalTask, reminders, generatedSchedule } = useAppContext();
   
+  // FORM STATE
   const [newTask, setNewTask] =  useState(defaultTask);
 
 
@@ -26,7 +37,6 @@ function Calendar() {
   Work: "bg-purple-500",
   };
 
-  const [selectedTask, setSelectedTask] = useState(null);
   const hasReminder = (taskId) =>
   reminders.some(r => r.taskId === taskId);
 
@@ -35,189 +45,211 @@ function Calendar() {
     setShowModal(true);
   };
 
-  const saveTask = () => {
+  const saveTask = async () => {
     const color = categoryColors[newTask.category] || "bg-gray-500";
 
     const taskData = {
-      ...defaultTask,
       ...newTask,
-      color, 
+      date: normalizeDate(newTask.date || selectedDate),
+      color,
     };
 
-    if (newTask.id) {
-      updateTask(taskData);
-    } else {
-      addTask(taskData);
-    }
+    try {
+      if (newTask.id) {
+        await updateTask(taskData);
+      } else {
+        await addTask(taskData);
+      }
 
-    setNewTask(defaultTask);
-    setShowModal(false);
+      setNewTask(defaultTask);
+      setShowModal(false);
+    } catch (err) {
+      console.error(err);
+    }
   };
   
   const getEventTop = (time) => {
-  const normalized = normalizeTime(time);
-  if (!normalized) return 0;
+    const normalized = normalizeTime(time);
+    if (!normalized) return 0;
 
-  const hours = toHours(normalized);
-  if (hours === null) return 0;
+    const hours = toHours(normalized);
+    if (hours === null) return 0;
 
-  return hours * 80;
-};
+    return hours * 80;
+  };
 
   const getEndTime = (startTime, durationHours) => {
-  const normalized = normalizeTime(startTime);
-  if (!normalized) return "";
+    const normalized = normalizeTime(startTime);
+    if (!normalized) return "";
 
-  const startHours = toHours(normalized);
-  if (startHours === null) return "";
+    const startHours = toHours(normalized);
+    if (startHours === null) return "";
 
-  const endHours = startHours + Number(durationHours || 0);
+    const endHours = startHours + Number(durationHours || 0);
 
-  return toTimeStr(endHours);
-};
+    return toTimeStr(endHours);
+  };
 
-const getEventHeight = (durationHours) => {
-  const duration = Number(durationHours);
+  const getEventHeight = (durationHours) => {
+    const duration = Number(durationHours);
 
-  if (isNaN(duration) || duration <= 0) return 0;
+    if (isNaN(duration) || duration <= 0) return 0;
 
-  return Math.max(duration * 80, 60); // 👈 minimum height
-};
+    return Math.max(duration * 80, 60); // 👈 minimum height
+  };
 
   useEffect(() => {
-  const el = scrollRef.current;
-  if (!el) return;
+    const el = scrollRef.current;
+    if (!el) return;
 
-  const now = new Date();
-
-  const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(
-    now.getMinutes()
-  ).padStart(2, "0")}`;
-
-  const top = getEventTop(timeStr);
-
-  el.scrollTop = top - 100;
-}, []);
-
+    requestAnimationFrame(() => {
+      el.scrollTop = 0;
+      checkVisibleEvents(layoutRef.current);
+    });
+  }, [selectedDate]);
   
 
-const normalizeEvent = (e) => {
-  const date = normalizeDate(e.date);
-  if (!date) return null; // ❌ reject bad date (don't fallback)
+  const normalizeEvent = (e) => {
+    const date = normalizeDate(e.date);
+    if (!date) return null; 
 
-  let time;
+    let time;
 
-  if (typeof e.start === "number") {
-    time = toTimeStr(e.start);
-  } else {
-    time = normalizeTime(e.time);
-  }
-
-  if (!time) return null; // ❌ reject bad time
-
-  return {
-    id: e.id || `gen-${e.date}-${e.time}-${e.title}`,
-    title: e.title || "Untitled",
-    date,
-    time,
-    duration: Number(e.duration) || 1,
-    category: e.category,
-    color: e.color || "bg-gray-500",
-  };
-};
-
-const layoutEvents = tasks
-  .map(normalizeEvent)
-  .filter(e => e.date === normalizeDate(selectedDate));
-
-
-const computeEventLayout = (events) => {
-  const enriched = events.map(e => {
-    const top = getEventTop(e.time);
-    const height = getEventHeight(e.duration);
-
-    return {
-      ...e,
-      top,
-      height,
-      bottom: top + height,
-    };
-  });
-
-  const sorted = [...enriched].sort((a, b) => a.top - b.top);
-
-  const layout = [];
-
-  for (let i = 0; i < sorted.length; i++) {
-    const current = sorted[i];
-    let col = 0;
-
-    while (
-      layout.some(
-        (e) =>
-          e.column === col &&
-          e.bottom > current.top &&
-          current.bottom > e.top
-      )
-    ) {
-      col++;
+    if (typeof e.start === "number") {
+      time = toTimeStr(e.start);
+    } else {
+      time = normalizeTime(e.time);
     }
 
-    layout.push({
-      ...current,
-      column: col,
+    if (!time) return null; 
+
+    return {
+      id: e.id || `gen-${e.date}-${e.time}-${e.title}`,
+      title: e.title || "Untitled",
+      date,
+      time,
+      duration: Number(e.duration) || 1,
+      category: e.category,
+      color: e.color || "bg-gray-500",
+    };
+  };
+
+  const layoutEvents = useMemo(() => {
+    return tasks
+      .map(normalizeEvent)
+      .filter(e => normalizeDate(e.date) === normalizeDate(selectedDate));
+  }, [tasks, selectedDate]);
+
+
+  const computeEventLayout = (events) => {
+    const enriched = events.map(e => {
+      const top = getEventTop(e.time);
+      const height = getEventHeight(e.duration);
+
+      return {
+        ...e,
+        top,
+        height,
+        bottom: top + height,
+      };
     });
-  }
 
-  return layout.map((event) => {
-    const overlapping = layout.filter(
-      (e) =>
-        e.top < event.bottom &&
-        event.top < e.bottom
-    );
+    const sorted = [...enriched].sort((a, b) => a.top - b.top);
 
-    const totalColumns =
-      Math.max(...overlapping.map((e) => e.column)) + 1;
+    const layout = [];
 
-    return { ...event, totalColumns };
-  });
-};
+    for (let i = 0; i < sorted.length; i++) {
+      const current = sorted[i];
+      let col = 0;
 
-const layout = computeEventLayout(layoutEvents);
+      while (
+        layout.some(
+          (e) =>
+            e.column === col &&
+            e.bottom > current.top &&
+            current.bottom > e.top
+        )
+      ) {
+        col++;
+      }
 
-useEffect(() => {
-  if (!layout?.length) return;
-  checkVisibleEvents(layout);
-}, [layout]);
+      layout.push({
+        ...current,
+        column: col,
+      });
+    }
 
-const checkVisibleEvents = (layout) => {
-  const el = scrollRef.current;
-  if (!el) return;
+    return layout.map((event) => {
+      const overlapping = layout.filter(
+        (e) =>
+          e.top < event.bottom &&
+          event.top < e.bottom
+      );
 
-  const scrollTop = el.scrollTop;
-  const visibleTop = scrollTop;
-  const visibleBottom = scrollTop + el.clientHeight;
+      const totalColumns =
+        Math.max(...overlapping.map((e) => e.column)) + 1;
 
-  setShowAbove(layout.some(e => e.bottom < visibleTop));
-  setShowBelow(layout.some(e => e.top > visibleBottom));
-};
+      return { ...event, totalColumns };
+    });
+  };
 
+  const layout = computeEventLayout(layoutEvents);
 
-const handleDeleteTask = (taskId) => {
-  deleteGlobalTask(taskId);
-  setSelectedTask(null);
-};
+  const layoutRef = useRef(layout);
 
-const editTask = (task) => {
-  setNewTask(task);
-  setSelectedTask(null);
-  setShowModal(true);
-};
+  useEffect(() => {
+    layoutRef.current = layout;
+  }, [layout]);
 
-const isTaskValid =
-  normalizeDate(newTask.date) &&
-  normalizeTime(newTask.time) &&
-  Number(newTask.duration) > 0;
+  const checkVisibleEvents = (layout) => {
+    const el = scrollRef.current;
+
+    if (!el || !layout.length) {
+      setShowAbove(false);
+      setShowBelow(false);
+      return;
+    }
+
+    const scrollTop = el.scrollTop;
+    const visibleTop = scrollTop;
+    const visibleBottom = scrollTop + el.clientHeight;
+
+    let above = false;
+    let below = false;
+
+    for (const e of layout) {
+      if (e.bottom <= visibleTop + 1) above = true;
+      if (e.top >= visibleBottom - 1) below = true;
+    }
+
+    setShowAbove(above);
+    setShowBelow(below);
+  };
+
+  const handleDeleteTask = (taskId) => {
+    deleteGlobalTask(taskId);
+    setSelectedTask(null);
+  };
+
+  const editTask = (task) => {
+    setNewTask({
+      id: task.id,
+      title: task.title,
+      category: task.category,
+      date: task.date,
+      time: task.time,
+      duration: task.duration,
+      details: task.details || "",
+    });
+
+    setSelectedTask(null);
+    setShowModal(true);
+  };
+
+  const isTaskValid =
+    normalizeDate(newTask.date) &&
+    normalizeTime(newTask.time) &&
+    Number(newTask.duration) > 0;
 
   return (
     <div className="flex-1 p-6 overflow-y-auto">
@@ -249,7 +281,11 @@ const isTaskValid =
         <div
           ref={scrollRef} 
           className="h-[70vh] overflow-y-auto relative bg-white rounded-xl shadow"
-          onScroll={checkVisibleEvents}
+          onScroll={() => {
+            requestAnimationFrame(() => {
+              checkVisibleEvents(layoutRef.current);
+            });
+          }}
         >
           <div className="relative" style={{ height: `${24 * 80}px` }}>
             {/* Hour rows */}
@@ -316,14 +352,14 @@ const isTaskValid =
       
       {/* Indicators */}
         {showAbove && (
-          <div className="absolute top-3 right-4 bg-gray-900 text-white text-xs px-3 py-1 rounded-full shadow">
-            ↑ Events above
+          <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-sm text-white text-[11px] px-2 py-1 rounded-full shadow-sm">
+            ↑ More
           </div>
         )}
 
         {showBelow && (
-          <div className="absolute bottom-3 right-4 bg-gray-900 text-white text-xs px-3 py-1 rounded-full shadow">
-            ↓ Events below
+          <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-sm text-white text-[11px] px-2 py-1 rounded-full shadow-sm">
+            ↓ More
           </div>
         )}
       </div>

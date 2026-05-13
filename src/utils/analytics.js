@@ -22,7 +22,6 @@ export function getActualWeeklyDistribution(tasks, date = new Date()) {
   }));
 }
 
-import { getTasksForWeek } from "./dateUtils";
 
 export function getActualWeeklyDistribution2(tasks, date) {
   if (!date) return [];
@@ -44,6 +43,6 @@ export function getActualWeeklyDistribution2(tasks, date) {
 
   return Object.entries(categoryMap).map(([name, value]) => ({
     name,
-    value: (value / total) * 100,
+    value, 
   }));
 }

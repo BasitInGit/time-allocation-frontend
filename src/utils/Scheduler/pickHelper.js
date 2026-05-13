@@ -1,62 +1,67 @@
-function pickCategory({
+import { scoreCategory, scoreIntensity } from "./scoreHelper";
+
+export function pickCandidate({
   categories,
+  categoryState,
   lastCategory,
+  awBuffer,
   timeOfDay,
   preferences,
-  distribution,
+  prevLoad,
+  categoryAnalysis,
+  isFirstTask,
+  slotDuration,
+  healthLoad,
+  justHadGap
 }) {
+
+  const intensities = ["low", "medium", "high"];
+
   let best = null;
   let bestScore = -Infinity;
+  
 
   for (const category of categories) {
-    const score = scoreCategory({
+
+    const categoryScore = scoreCategory({
       category,
-      lastCategory,
-      timeOfDay,
+      categoryState,
       preferences,
-      distribution,
+      lastCategory,
+      awBuffer,
+      timeOfDay,
+      isFirstTask,
+      healthLoad,
+      justHadGap
     });
 
-    if (score > bestScore) {
-      bestScore = score;
-      best = category;
+    for (const intensity of intensities) {
+
+      const intensityScore = scoreIntensity({
+        category,
+        categoryState,
+        intensity,
+        prevLoad,
+        preferences,
+        categoryAnalysis,
+        slotDuration
+      });
+
+      const combinedScore =
+        categoryScore +
+        intensityScore;
+
+      if (combinedScore > bestScore) {
+
+        bestScore = combinedScore;
+
+        best = {
+          category,
+          intensity,
+        };
+      }
     }
   }
 
   return best;
-}
-
-
-function pickIntensity({
-  category,
-  prevLoad,
-  preferences,
-  categoryAnalysis,
-}) {
-  const pref = preferences.find(p => p.name === category);
-  const userIntensity = pref?.intensity || "medium";
-
-  const analysis = categoryAnalysis?.[category];
-
-  // 🔹 Step 1: start from user choice
-  let final = userIntensity;
-
-  // 🔹 Step 2: adjust UP if deadlines demand it
-  if (analysis?.recommendedIntensity === "Intense") {
-    final = "high";
-  } else if (
-    analysis?.recommendedIntensity === "Balanced" &&
-    final === "low"
-  ) {
-    final = "medium";
-  }
-
-  // 🔹 Step 3: adjust DOWN if fatigue is high
-  if (prevLoad >= 3) {
-    final = "low";
-  } else if (prevLoad >= 2 && final === "high") {
-    final = "medium";
-  }
-
-  return final;
 }

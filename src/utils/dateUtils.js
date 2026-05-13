@@ -71,7 +71,12 @@ export const diffDays = (dateA, dateB) => {
 // Normalize ANY date input → YYYY-MM-DD
 export const normalizeDate = (date) => {
   if (!date) return null;
-  return date.split("T")[0];
+
+  if (date instanceof Date) {
+    return date.toISOString().split("T")[0];
+  }
+
+  return String(date).split("T")[0];
 };
 
 export const buildDateTime = (dateStr, timeStr) => {

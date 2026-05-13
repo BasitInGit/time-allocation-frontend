@@ -2,6 +2,29 @@ import { createContext, useContext, useState, useEffect } from "react";
 import { getActualWeeklyDistribution } from "../utils/analytics";
 import { getWeekRangeLabel, buildDateTime, getTasksForWeek } from "../utils/dateUtils";
 import { timeToMinutesSafe } from "../utils/Scheduler/timeUtils";
+import {
+  fetchTasks,
+  createTask,
+  updateTaskApi,
+  deleteTaskApi,
+} from "../assets/api/tasks";
+import {
+  fetchReminders,
+  createReminder,
+  updateReminderApi,
+  deleteReminderApi,
+} from "../assets/api/reminders";
+import {
+  fetchDeadlines,
+  createDeadline,
+  updateDeadlineApi,
+  deleteDeadlineApi,
+} from "../assets/api/deadlines";
+
+import {
+  fetchTimeDistribution,
+  saveTimeDistribution,
+} from "../assets/api/timeDistribution";
 
 const AppContext = createContext();
 
@@ -64,64 +87,156 @@ export function AppProvider({ children }) {
   const [reminders, setReminders] = useState([]);
   const [schedulePreferences, setSchedulePreferences] = useState([]);
 
-  const [generatedSchedule, setGeneratedSchedule] = useState({
-    schedule: [],
-    analysis: {
-      totalHours: 0,
-      recommendedIntensity: "Balanced",
-      warning: null,
-    },
-  });
-
   //  Add task
-const addTask = (task) => {
+const addTask = async (task) => {
   const newTask = {
     ...defaultTask,
     ...task,
     id: crypto.randomUUID(),
   };
 
-  setTasks(prev => [...prev, newTask]);
+  try {
+    await createTask(newTask);
+
+    setTasks(prev => [...prev, newTask]);
+  } catch (err) {
+    console.error(err);
+  }
 };
 
 //  Delete task
-const deleteTask = (id) => {
-  setTasks(prev => prev.filter(task => task.id !== id));
+const deleteTask = async (id) => {
+  try {
+    await deleteTaskApi(id);
+
+    setTasks(prev =>
+      prev.filter(task => task.id !== id)
+    );
+  } catch (err) {
+    console.error(err);
+  }
 };
 
-const updateTask = (updatedTask) => {
-  setTasks(prev =>
-    prev.map(task =>
-      task.id === updatedTask.id
-  ? { ...task, ...updatedTask }
-  : task
-    )
-  );
+const updateTask = async (updatedTask) => {
+   try {
+    await updateTaskApi(updatedTask);
+
+    setTasks(prev =>
+      prev.map(task =>
+        task.id === updatedTask.id
+          ? updatedTask
+          : task
+      )
+    );
+  } catch (err) {
+    console.error(err);
+  }
 };
 
-const addReminder = (reminder) => {
+const addReminder = async (reminder) => {
   const newReminder = {
+    ...defaultReminder,
     ...reminder,
     id: crypto.randomUUID(),
   };
 
-  setReminders(prev => [...prev, newReminder]);
+  try {
+    await createReminder(newReminder);
+
+    setReminders(prev => [
+      ...prev,
+      newReminder,
+    ]);
+  } catch (err) {
+    console.error(err);
+  }
 };
 
-const updateReminder = (updatedReminder) => {
-  setReminders(prev =>
-    prev.map(reminder =>
-      reminder.id === updatedReminder.id
-        ? { ...reminder, ...updatedReminder }
-        : reminder
-    )
-  );
+const updateReminder = async (updatedReminder) => {
+  try {
+    await updateReminderApi(updatedReminder);
+
+    setReminders(prev =>
+      prev.map(reminder =>
+        reminder.id === updatedReminder.id
+          ? updatedReminder
+          : reminder
+      )
+    );
+  } catch (err) {
+    console.error(err);
+  }
 };
 
-const deleteReminder = (id) => {
-  setReminders(prev => prev.filter(r => r.id !== id));
+const deleteReminder = async (id) => {
+  try {
+    await deleteReminderApi(id);
+
+    setReminders(prev =>
+      prev.filter(r => r.id !== id)
+    );
+  } catch (err) {
+    console.error(err);
+  }
 };
 
+const addDeadline = async (deadline) => {
+  const newDeadline = {
+    ...deadline,
+    id: crypto.randomUUID(),
+  };
+
+  try {
+    await createDeadline(newDeadline);
+
+    setDeadlines(prev => [
+      ...prev,
+      newDeadline,
+    ]);
+  } catch (err) {
+    console.error(err);
+  }
+};
+
+const updateDeadline = async (
+  updatedDeadline
+) => {
+  try {
+    await updateDeadlineApi(updatedDeadline);
+
+    setDeadlines(prev =>
+      prev.map(deadline =>
+        deadline.id === updatedDeadline.id
+          ? updatedDeadline
+          : deadline
+      )
+    );
+  } catch (err) {
+    console.error(err);
+  }
+};
+
+const deleteDeadline = async (id) => {
+  try {
+    await deleteDeadlineApi(id);
+
+    setDeadlines(prev =>
+      prev.filter(d => d.id !== id)
+    );
+  } catch (err) {
+    console.error(err);
+  }
+};
+
+const updateTimeDistribution = async (newDistribution) => {
+  try {
+    await saveTimeDistribution(newDistribution);
+
+    setTimeDistribution(newDistribution);
+  } catch (err) {
+    console.error(err);
+  }
+};
 
 const sortTasksByTime = (taskList) =>
   [...taskList].sort(
@@ -133,7 +248,7 @@ const getUpcomingTasks = () => {
   const now = new Date();
 
   return tasks
-    .filter(task => !task.isDeadline && !task.isCompleted && task.time && task.date)
+    .filter(task => task.time && task.date)
     .filter(task => {
       const taskDateTime = buildDateTime(task.date, task.time);
       return taskDateTime && taskDateTime >= now; // only future tasks
@@ -171,63 +286,51 @@ const getWeeklyActualDistribution = () => {
 
 const weekLabel = getWeekRangeLabel(new Date());
 
-  // LOAD FROM LOCAL STORAGE
+  // LOAD DATA
+ useEffect(() => {
+  async function loadAll() {
+    const [t, r, d, dist] = await Promise.all([
+      fetchTasks(),
+      fetchReminders(),
+      fetchDeadlines(),
+      fetchTimeDistribution(),
+    ]);
+
+    setTasks(t);
+    setReminders(r);
+    setDeadlines(d);
+
+    setTimeDistribution(
+      dist?.length ? dist : DEFAULT_DISTRIBUTION
+    );
+  }
+
+  loadAll();
+}, []);
+
+
   useEffect(() => {
-    const savedTasks = JSON.parse(localStorage.getItem("tasks")) || [];
-    const normalizedTasks = savedTasks.map(task => ({
-    ...defaultTask,
-    ...task,
-    }));
-    setTasks(normalizedTasks);
-
-    const savedRems  = JSON.parse(localStorage.getItem("reminders")) || [];
-    setReminders(
-  savedRems?.length ? savedRems : []
-);
-
     const savedPrefs = JSON.parse(localStorage.getItem("schedulePreferences"));
 
     setSchedulePreferences(
       savedPrefs?.length ? savedPrefs : DEFAULT_PREFERENCES
     );
-
-    const savedDead = JSON.parse(localStorage.getItem("deadlines")) || [];
-    setDeadlines(savedDead);
-
-    const savedDist = JSON.parse(localStorage.getItem("timeDistribution"));
-    setTimeDistribution(
-    savedDist?.length ? savedDist : DEFAULT_DISTRIBUTION
-);
   }, []);
 
-  // SAVE TO LOCAL STORAGE
+  // SAVE DATA
   useEffect(() => {
-    localStorage.setItem("tasks", JSON.stringify(tasks));
-  }, [tasks]);
+    localStorage.setItem(
+      "schedulePreferences",
+      JSON.stringify(schedulePreferences)
+    );
+  }, [schedulePreferences]);
 
-  useEffect(() => {
-    localStorage.setItem("deadlines", JSON.stringify(deadlines));
-  }, [deadlines]);
-
-  useEffect(() => {
-    localStorage.setItem("reminders", JSON.stringify(reminders));
-  }, [reminders]);
-
-  useEffect(() => {
-    localStorage.setItem("timeDistribution", JSON.stringify(timeDistribution));
-  }, [timeDistribution]);
-
-  useEffect(() => {
-  localStorage.setItem(
-    "schedulePreferences",
-    JSON.stringify(schedulePreferences)
-  );
-}, [schedulePreferences]);
 
   return (
     <AppContext.Provider
       value={{
         tasks,
+        setTasks,
         defaultTask,
         addTask,
         deleteTask,
@@ -240,8 +343,11 @@ const weekLabel = getWeekRangeLabel(new Date());
 
         deadlines,
         setDeadlines,
+        addDeadline,
+        updateDeadline,
+        deleteDeadline,
         timeDistribution,
-        setTimeDistribution,
+        updateTimeDistribution,
         reminders,
         setReminders,
         defaultReminder,
@@ -250,8 +356,6 @@ const weekLabel = getWeekRangeLabel(new Date());
         deleteReminder,
         schedulePreferences,
         setSchedulePreferences,
-        generatedSchedule,
-        setGeneratedSchedule,
       }}
     >
       {children}

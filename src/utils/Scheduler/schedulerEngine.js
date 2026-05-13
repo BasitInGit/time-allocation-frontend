@@ -1,11 +1,17 @@
 import { toHours, toTimeStr } from "./timeUtils";
 import { buildTimelineBlocks } from "./timelineBuilder";
 import { getGap } from "./gapHelper";
-import { getAllowedCategories } from "./scoreHelper";
-import { pickCategory, pickIntensity } from "./pickHelper";
+import { pickCandidate } from "./pickHelper";
 import { pickTask, TASK_LIBRARY } from "./taskPicker";
 import { normalizeDate } from "../dateUtils";
 
+const mapIntensity = (category,val) => {
+  if (category === "Leisure") return "Balanced"; 
+  if (val === "low") return "Light";
+  if (val === "medium") return "Balanced";
+  if (val === "high") return "Intense";
+  return "Balanced";
+};
 
 export function generateSchedule({
   date,
@@ -35,10 +41,39 @@ export function generateSchedule({
   }))
   .filter(block => block.end > block.start);
 
+  const totalFreeHours =
+    baseTimeline.reduce((sum, block) => {
+      if (block.type === "free") {
+        return sum + (block.end - block.start);
+      }
+      return sum;
+    }, 0);
+
+  const categoryState = {};
+
+  const activeDistribution =
+    Array.isArray(distribution) && distribution.length > 0
+      ? distribution
+      : preferences.map(p => ({
+          category: p.name,
+          pressure: 1 / preferences.length,
+        }));
+
+  for (const d of activeDistribution) {
+    categoryState[d.category] = {
+      targetHours: d.pressure * totalFreeHours,
+      usedHours: 0,
+    };
+  }
+
+  let loadMax = 2;
   let lastCategory = null;
+  let awBuffer = [];
   let lastTaskName = null;
+  let healthLoad = 0;
   let prevLoad = 0;
   let gap = 0;
+  let justHadGap = false;
 
   const scheduled = [];
 
@@ -46,19 +81,20 @@ for (const block of baseTimeline) {
 
   const duration = block.end - block.start;
 
-  const timeOfDay =
-    block.start < 12 ? "morning" :
-    block.start < 17 ? "afternoon" :
-    "evening";
-
-  // =====================
   // FIXED BLOCK
-  // =====================
   if (block.type === "fixed") {
 
     prevLoad += duration;
 
-    if (prevLoad >= 2) {
+    if (prevLoad >= loadMax) {
+
+      const projectedCursor = block.start + prevLoad;
+
+      const timeOfDay =
+        projectedCursor < 12 ? "morning" :
+        projectedCursor < 17 ? "afternoon" :
+        "evening";
+        
       gap = getGap(prevLoad, timeOfDay);
       prevLoad = 0;
     }
@@ -66,47 +102,66 @@ for (const block of baseTimeline) {
     continue;
   }
 
-  // =====================
   // FREE BLOCK
-  // =====================
+  if (gap > 0){
+    justHadGap = true;
+  }
   let remaining = duration - gap;
+  remaining = Math.floor(remaining * 2) / 2;
   let cursor = block.start + gap;
 
   gap = 0;
 
+  const categories = preferences.map(p => p.name);
+
   while (remaining > 0) {
 
-    const allowed = getAllowedCategories(timeOfDay, preferences);
-    const categories = allowed.length
-      ? allowed
-      : preferences.map(p => p.name);
+    const timeOfDay =
+      cursor < 12 ? "morning" :
+      cursor < 17 ? "afternoon" :
+      "evening";
 
-    const category = pickCategory({
+    const isFirstTask = scheduled.length === 0;
+
+    const candidate = pickCandidate({
       categories,
+      categoryState,
       lastCategory,
+      awBuffer,
       timeOfDay,
       preferences,
-      distribution,
-    });
-
-    if (!category) break;
-
-    const intensity = pickIntensity({
-      category,
       prevLoad,
-      preferences,
       categoryAnalysis,
+      isFirstTask,
+      slotDuration: Math.min(1.5, remaining),
+      healthLoad, 
+      justHadGap
     });
 
+    if (!candidate) break;
+
+    const { category, intensity } = candidate;
+
+    if (category === "Academic" || category === "Work") {
+      awBuffer.push(category);
+      if (awBuffer.length > 2) {
+        awBuffer.shift();
+      }
+    } else {
+      awBuffer = [];
+    }
+    console.log("AW BUFFER:", awBuffer);
+
+    const intensityKey = mapIntensity(category,intensity);
 
     const task = pickTask({
       category,
-      intensity,
-      slotDuration: Math.min(2, remaining),
+      intensity:intensityKey,
+      slotDuration: Math.min(1.5, remaining),
       taskLibrary: TASK_LIBRARY,
       lastTaskName,
     });
-
+    
     if (!task) break;
 
     scheduled.push({
@@ -116,19 +171,26 @@ for (const block of baseTimeline) {
       end: cursor + task.duration,
     });
 
-    lastCategory = category;
+    justHadGap = false;
+    lastCategory = category
     lastTaskName = task.name;
-
     cursor += task.duration;
     remaining -= task.duration;
     prevLoad += task.duration;
+    categoryState[category].usedHours += task.duration;
 
-    if (prevLoad >= 2) {
+    if (category === "Health") {
+      healthLoad += task.duration;
+    }
+
+    if (prevLoad >= loadMax) {
       gap = getGap(prevLoad, timeOfDay);
       prevLoad = 0;
       cursor += gap;
       remaining -= gap;
+      justHadGap = true;
     }
+    
   }
 }
 return scheduled

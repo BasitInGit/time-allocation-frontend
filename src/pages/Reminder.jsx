@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAppContext } from "../context/AppContext";
 import { useParams } from "react-router-dom";
 import { useRef } from "react";
@@ -21,6 +21,14 @@ function Reminders() {
     frequency: "once",
   });
 
+  const taskMap = useMemo(() => {
+    const map = {};
+    for (const t of tasks) {
+      map[t.id] = t;
+    }
+    return map;
+  }, [tasks]);
+
   useEffect(() => {
     if (taskId) {
       const found = tasks.find(t => t.id === taskId);
@@ -30,112 +38,164 @@ function Reminders() {
     }
   }, [taskId]); 
 
-const selectTask = (task) => {
-  if (!task) return;
+  const selectTask = (item) => {
+    if (!item) return;
 
-  setSelectedTask(task);
-  setSelectedDate(task.date || "");
+    // If it's already a task
+    let realTask = tasks.find(t => t.id === item.id);
 
-  const existing = reminders.find(r => r.taskId === task.id);
+    // If it's a reminder object
+    if (!realTask && item.taskId) {
+      realTask = tasks.find(t => t.id === item.taskId);
+    }
 
-  setForm({
-    reminderDate: existing?.reminderDate ?? "",
-    reminderTime: existing?.reminderTime ?? "",
-    frequency: existing?.frequency ?? "once",
-  });
-};
+    if (!realTask) return;
+
+    setSelectedTask(realTask);
+
+    setSelectedDate(realTask.date || "");
+
+    const existing = reminders.find(
+      r => r.taskId === realTask.id
+    );
+
+    setForm({
+      reminderDate: existing?.reminderDate ?? "",
+      reminderTime: existing?.reminderTime ?? "",
+      frequency: existing?.frequency ?? "once",
+    });
+  };
 
   const [recentlySavedId, setRecentlySavedId] = useState(null);
 
-const handleSave = () => {
-  if (!selectedTask) return;
+  const enrichedReminders = useMemo(() => {
+    return reminders
+      .map((r) => {
+        const task = taskMap[r.taskId];
 
-  const existing = reminders.find(r => r.taskId === selectedTask.id);
+        if (!task) return null; 
 
-  const newReminder = {
-    id: existing?.id || crypto.randomUUID(),
-    taskId: selectedTask.id,
-    reminderDate: normalizeDate(form.reminderDate),
-    reminderTime: normalizeTime(form.reminderTime),
-    frequency: form.frequency,
-  };
+        return {
+          ...r,
+          taskTitle: task.title,
+          taskDate: task.date,
+        };
+      })
+      .filter(Boolean);
+  }, [reminders, taskMap]);
 
-  if (existing) {
-    updateReminder(newReminder);
-  } else {
-    addReminder(newReminder);
-  }
+  const handleSave = async () => {
+    if (!selectedTask) return;
 
-  setRecentlySavedId(selectedTask.id);
+    const existing = reminders.find(r => r.taskId === selectedTask.id);
 
-  setTimeout(() => {
-    taskRefs.current[selectedTask.id]?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    });
-  }, 100);
+    const newReminder = {
+      id: existing?.id || crypto.randomUUID(),
+      taskId: selectedTask.id,
+      reminderDate: normalizeDate(form.reminderDate),
+      reminderTime: normalizeTime(form.reminderTime),
+      frequency: form.frequency,
+    };
 
-  setTimeout(() => setRecentlySavedId(null), 1500);
+    if (existing) {
+      await updateReminder(newReminder);
+    } else {
+      await addReminder(newReminder);
+    }
 
-  setSelectedTask(null);
-  setSelectedDate("");
-  setForm({
-    reminderDate: "",
-    reminderTime: "",
-    frequency: "once",
-  });
-};
+    setRecentlySavedId(selectedTask.id);
 
-const handleDeleteReminder = (task) => {
-  const reminder = reminders.find(r => r.taskId === task.id);
-  if (!reminder) return;
+    setTimeout(() => {
+      taskRefs.current[selectedTask.id]?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 100);
 
-  deleteReminder(reminder.id);
+    setTimeout(() => setRecentlySavedId(null), 1500);
 
-  if (selectedTask?.id === task.id) {
     setSelectedTask(null);
+    setSelectedDate("");
     setForm({
       reminderDate: "",
       reminderTime: "",
       frequency: "once",
     });
-  }
-};
- 
+  };
 
-const isOverdue = (r) => {
-  const now = new Date();
-  const due = buildDateTime(r.reminderDate, r.reminderTime);
-  return due ? due < now : false;
-};
+  const handleDeleteReminder = async (item) => {
+  const taskId = item.taskId || item.id;
 
-  const isToday = (task) => {
-    const taskDate = new Date(task.reminderDate);
-    const today = new Date();
+  const reminder = reminders.find(r => r.taskId === taskId);
+    if (!reminder) return;
 
-    return (
-        taskDate.getFullYear() === today.getFullYear() &&
-        taskDate.getMonth() === today.getMonth() &&
-        taskDate.getDate() === today.getDate()
-    );
+    await deleteReminder(reminder.id);
+
+    if (selectedTask?.id === taskId) {
+      setSelectedTask(null);
+      setForm({
+        reminderDate: "",
+        reminderTime: "",
+        frequency: "once",
+      });
+    }
+  };
+  
+
+  const isOverdue = (r) => {
+    if (!r) return false;
+
+    const now = new Date();
+    const due = buildDateTime(r.reminderDate, r.reminderTime);
+    return due ? due < now : false;
+  };
+
+  const isToday = (r) => {
+    if (!r?.reminderDate) return false;
+
+    const taskDate = normalizeDate(r.reminderDate);
+    const today = normalizeDate(new Date());
+
+    return taskDate === today;
   };
 
 
-  const overdueReminders = reminders.filter(isOverdue);
-  const todayReminders = reminders.filter(
-    t => !isOverdue(t) && isToday(t)
-  );
-  const upcomingReminders = reminders.filter(
-    t => !isOverdue(t) && !isToday(t)
-  );
+  const { overdueReminders, todayReminders, upcomingReminders } = useMemo(() => {
+    const overdue = [];
+    const today = [];
+    const upcoming = [];
 
-  const filteredTasks = selectedTask
-  ? []
-  : tasks.filter(
-      t =>
-        normalizeDate(t.date) === normalizeDate(selectedDate) &&
-        (!t.reminder || t.id === selectedTask?.id)
+    for (const r of enrichedReminders) {
+      if (isOverdue(r)) {
+        overdue.push(r);
+      } else if (isToday(r)) {
+        today.push(r);
+      } else {
+        upcoming.push(r);
+      }
+    }
+
+    return {
+      overdueReminders: overdue,
+      todayReminders: today,
+      upcomingReminders: upcoming,
+    };
+  }, [enrichedReminders]);
+
+  const filteredTasks = useMemo(() => {
+  if (!selectedDate) return [];
+
+  return tasks.filter((t) => {
+    const sameDate =
+      normalizeDate(t.date) === normalizeDate(selectedDate);
+
+    const alreadyHasReminder = reminders.some(
+      (r) => r.taskId === t.id
     );
+
+    return sameDate && !alreadyHasReminder;
+  });
+}, [tasks, reminders, selectedDate]);
 
   const ReminderSection = ({ title, items, color }) => {
     if (!items.length) return null;
@@ -161,7 +221,9 @@ const isOverdue = (r) => {
                     : "hover:bg-gray-100"
                 }`}
             >
-                <p className="font-medium">{task.title}</p>
+                <p className="font-medium">
+                  {task.taskTitle}
+                </p>
 
                 <p className="text-xs text-gray-500 mb-1">
                 ⏰ {task.reminderDate} {task.reminderTime}
@@ -173,10 +235,7 @@ const isOverdue = (r) => {
 
                 <div className="flex gap-3 mt-2">
                 <button
-                    onClick={() => {
-                      const fullTask = tasks.find(t => t.id === task.taskId || t.id === task.id);
-                      selectTask(fullTask || task);
-                    }}
+                    onClick={() => selectTask(task)}
                     className="text-sm text-indigo-600"
                 >
                     Edit
@@ -281,21 +340,19 @@ const isOverdue = (r) => {
 
       {/* 🔹 Step 3: Selected Task Display */}
       {selectedTask && (
-        <div className="mb-4 p-3 bg-indigo-50 rounded border">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-sm text-gray-600">
-                Selected Task:
-              </p>
-              <p className="font-medium">
-                {selectedTask.title}
-              </p>
-            </div>
+        <div className="mb-4 p-4 bg-indigo-50 rounded-lg border border-indigo-100">
+          <p className="text-xs uppercase tracking-wide text-indigo-500 mb-1">
+            Selected Task
+          </p>
 
-            {/* 🔄 Change task button */}
+          <div className="flex items-center justify-between">
+            <p className="font-medium text-gray-800">
+              {selectedTask.title}
+            </p>
+
             <button
               onClick={() => setSelectedTask(null)}
-              className="text-sm text-indigo-600"
+              className="text-sm font-medium text-indigo-600 hover:text-indigo-800 transition"
             >
               Change
             </button>
@@ -327,15 +384,33 @@ const isOverdue = (r) => {
           <label className="block text-sm text-gray-600 mb-1">
             Reminder Time
           </label>
-          <input
-            type="time"
+          <select
             value={form.reminderTime}
             onChange={(e) =>
               setForm({ ...form, reminderTime: e.target.value })
             }
-            className={`w-full border p-2 rounded transition
-            ${!form.reminderTime ? "text-gray-400 blur-[0.2px]" : ""}`}
-          />
+            className="w-full border p-2 rounded text-gray-900"
+          >
+            <option value="" className="text-gray-400">
+              Select time
+            </option>
+
+            {Array.from({ length: 24 }, (_, hour) =>
+              [0, 15, 30, 45].map((minute) => {
+                const time = `${hour
+                  .toString()
+                  .padStart(2, "0")}:${minute
+                  .toString()
+                  .padStart(2, "0")}`;
+
+                return (
+                  <option key={time} value={time}>
+                    {time}
+                  </option>
+                );
+              })
+            )}
+          </select>
         </div>
 
         {/* 🔹 Frequency */}
@@ -348,18 +423,26 @@ const isOverdue = (r) => {
             onChange={(e) =>
               setForm({ ...form, frequency: e.target.value })
             }
-            className="w-full border p-2 rounded text-gray-700"
+            className="w-full border p-2 rounded text-gray-900 bg-white"
           >
-            <option value="once">Once</option>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
+            <option value="once" className="text-black">
+              Once
+            </option>
+
+            <option value="daily" className="text-black">
+              Daily
+            </option>
+
+            <option value="weekly" className="text-black">
+              Weekly
+            </option>
           </select>
         </div>
 
         {/* 🔹 Save Button */}
         <button
           onClick={handleSave}
-          className="bg-indigo-600 text-white px-4 py-2 rounded"
+          className="bg-indigo-600 hover:bg-indigo-700 transition text-white px-4 py-2 rounded-lg font-medium"
         >
           Save Reminder
         </button>

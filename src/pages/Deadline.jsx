@@ -11,7 +11,12 @@ const CATEGORIES = [
 ];
 
 function Deadlines() {
-  const { deadlines, setDeadlines } = useAppContext();
+  const {
+    deadlines,
+    addDeadline,
+    updateDeadline,
+    deleteDeadline,
+  } = useAppContext();
 
   const [selectedDeadline, setSelectedDeadline] = useState(null);
   const [recentlySavedId, setRecentlySavedId] = useState(null);
@@ -40,57 +45,71 @@ function Deadlines() {
   };
 
   // ================= SAVE =================
-  const handleSave = () => {
-  if (!form.title || !form.date) return;
+  const handleSave = async () => {
+    if (!form.title || !form.date) return;
 
-  const updatedItem = {
-    ...form,
-    time: form.time ? normalizeTime(form.time) : "",
-    duration: Math.max(0.5, Number(form.duration) || 1)
-  };
-
-  let updated;
-
-  if (selectedDeadline) {
-    updated = deadlines.map((d) =>
-      d.id === selectedDeadline.id
-        ? { ...d, ...updatedItem }
-        : d
-    );
-
-    setRecentlySavedId(selectedDeadline.id);
-  } else {
-    const newDeadline = {
-      id: crypto.randomUUID(),
-      ...updatedItem,
+    const updatedItem = {
+      ...form,
+      time: form.time
+        ? normalizeTime(form.time)
+        : "",
+      duration: Math.max(
+        0.5,
+        Number(form.duration) || 1
+      ),
     };
 
-    updated = [...(deadlines || []), newDeadline];
-    setRecentlySavedId(newDeadline.id);
-  }
+    try {
+      if (selectedDeadline) {
+        const updatedDeadline = {
+          ...selectedDeadline,
+          ...updatedItem,
+        };
 
-  setDeadlines(updated);
+        await updateDeadline(
+          updatedDeadline
+        );
 
-  setTimeout(() => setRecentlySavedId(null), 1500);
+        setRecentlySavedId(
+          selectedDeadline.id
+        );
+      } else {
+        const newDeadline = {
+          ...updatedItem,
+        };
 
-  setSelectedDeadline(null);
+        await addDeadline(newDeadline);
+      }
 
-  setForm({
-    title: "",
-    date: "",
-    time: "",
-    category: "Academic",
-    duration: 1,
-  });
-};
+      setTimeout(
+        () => setRecentlySavedId(null),
+        1500
+      );
+
+      setSelectedDeadline(null);
+
+      setForm({
+        title: "",
+        date: "",
+        time: "",
+        category: "Academic",
+        duration: 1,
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   // ================= DELETE =================
-  const handleDelete = (d) => {
-    const updated = deadlines.filter((x) => x.id !== d.id);
-    setDeadlines(updated);
+  const handleDelete = async (d) => {
+    try {
+      await deleteDeadline(d.id);
 
-    if (selectedDeadline?.id === d.id) {
-      setSelectedDeadline(null);
+      if (selectedDeadline?.id === d.id) {
+        setSelectedDeadline(null);
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -234,20 +253,39 @@ const { overdue, upcoming } = useMemo(() => {
         </div>
 
         {/* TIME */}
-<div className="mb-4">
-  <label className="block text-sm text-gray-600 mb-1">
-    Due Time (optional)
-  </label>
+  <div className="mb-4">
+    <label className="block text-sm text-gray-600 mb-1">
+      Due Time (optional)
+    </label>
 
-  <input
-    type="time"
-    value={form.time}
-    onChange={(e) =>
-      setForm({ ...form, time: e.target.value })
-    }
-    className="w-full border p-2 rounded"
-  />
-</div>
+    <select
+      value={form.time}
+      onChange={(e) =>
+        setForm({ ...form, time: e.target.value })
+      }
+      className="w-full border p-2 rounded text-gray-900"
+    >
+      <option value="" className="text-gray-400">
+        Select time
+      </option>
+
+      {Array.from({ length: 24 }, (_, hour) =>
+        [0, 15, 30, 45].map((minute) => {
+          const time = `${hour
+            .toString()
+            .padStart(2, "0")}:${minute
+            .toString()
+            .padStart(2, "0")}`;
+
+          return (
+            <option key={time} value={time}>
+              {time}
+            </option>
+          );
+        })
+      )}
+    </select>
+  </div>
 
         {/* CATEGORY */}
         <div className="mb-4">
