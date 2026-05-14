@@ -1,3 +1,77 @@
+/**
+ * Scoring System (Category + Intensity)
+ *
+ * Converts scheduling constraints into numeric scores used for decision-making.
+ *
+ * Category scoring:
+ * - Encourages balanced distribution of workload
+ * - Penalizes repetition and rigid sequences
+ * - Applies time-of-day preference matching
+ * - Controls special constraints (e.g., Health load limits)
+ *
+ * Intensity scoring:
+ * - Matches user preference intensity (low/medium/high)
+ * - Adjusts for fatigue (prevLoad)
+ * - Aligns with category analysis recommendations
+ * - Penalizes oversized tasks in small time slots
+ */
+
+export const SCORES = {
+  leisure: {
+    firstTask: -10,
+    afterGap: -10
+  },
+
+  timePreference: {
+    match: 4,
+    mismatch: -2,
+    neutral: 2
+  },
+
+  repetition: {
+    sameCategory: -4,
+    academicWorkLoop: -4
+  },
+
+  health: {
+    softPenalty: -4,
+    hardPenalty: -1000
+  },
+
+  slotFit: {
+    lowInShortSlot: 4,
+    mediumInShortSlot: -1000,
+    highInShortSlot: -1000
+  },
+
+  intensityPreference: {
+    exactMatch: 3
+  },
+
+  analysis: {
+    intenseMatch: 2.5,
+    balancedMatch: 2.5,
+    lightMatch: 2.5
+  },
+
+  fatigue: {
+    highAfterHeavy: -3,
+    highAfterMedium: -1.5,
+    mediumAfterHeavy: -1
+  },
+
+  remainingLoad: {
+    highIntensityWhenLotsRemaining: 1.5,
+    highIntensityNearCompletion: -2,
+    mediumIntensityWhenBehind: 0.5
+  },
+
+  distribution: {
+    pressureMultiplier: 1.2,
+    pressureCap: 3
+  }
+};
+
 export function scoreCategory({
   category,
   categoryState,
@@ -12,67 +86,121 @@ export function scoreCategory({
 }) {
   let score = 0;
 
-  const pref = preferences.find(p => p.name === category);
+  const pref =
+    preferences.find(p => p.name === category);
+
+  // =========================
+  // LEISURE PENALTIES
+  // =========================
 
   if (
     isFirstTask &&
     category === "Leisure"
   ) {
-    score -= 10;
+    score += SCORES.leisure.firstTask;
   }
 
-  if (justHadGap && category === "Leisure") {
-    score -= 10;
+  if (
+    justHadGap &&
+    category === "Leisure"
+  ) {
+    score += SCORES.leisure.afterGap;
   }
+
+  // =========================
+  // TIME PREFERENCE
+  // =========================
 
   if (pref) {
+
     if (pref.preferredTime === timeOfDay) {
-      score += 4;
-    } else if (pref.preferredTime !== "any") {
-      score -= 2;
-    } else {
-      score += 2;
+      score += SCORES.timePreference.match;
+    }
+
+    else if (pref.preferredTime !== "any") {
+      score += SCORES.timePreference.mismatch;
+    }
+
+    else {
+      score += SCORES.timePreference.neutral;
     }
   }
 
-  const safeAwBuffer = Array.isArray(awBuffer) ? awBuffer : [];
+  // =========================
+  // ACADEMIC / WORK LOOP
+  // =========================
+
+  const safeAwBuffer =
+    Array.isArray(awBuffer)
+      ? awBuffer
+      : [];
 
   const isRecentAcademicWork =
     safeAwBuffer.length === 2 &&
     (
-    (safeAwBuffer[0] === "Academic" && safeAwBuffer[1] === "Work") ||
-    (safeAwBuffer[0] === "Work" && safeAwBuffer[1] === "Academic")
-  );
+      (
+        safeAwBuffer[0] === "Academic" &&
+        safeAwBuffer[1] === "Work"
+      ) ||
+      (
+        safeAwBuffer[0] === "Work" &&
+        safeAwBuffer[1] === "Academic"
+      )
+    );
 
-  if (isRecentAcademicWork && (category === "Academic" || category === "Work")) {
-    score -= 4; 
+  if (
+    isRecentAcademicWork &&
+    (
+      category === "Academic" ||
+      category === "Work"
+    )
+  ) {
+    score += SCORES.repetition.academicWorkLoop;
   }
+
+  // =========================
+  // SAME CATEGORY REPETITION
+  // =========================
 
   if (category === lastCategory) {
-    score -= 4;
+    score += SCORES.repetition.sameCategory;
   }
-  
-  const state = categoryState?.[category];
 
+  // =========================
+  // HEALTH LOAD
+  // =========================
+
+  const state =
+    categoryState?.[category];
 
   if (category === "Health") {
+
     if (healthLoad >= 2) {
       state.targetHours = state.usedHours;
-      return -1000;
+
+      return SCORES.health.hardPenalty;
     }
+
     else if (healthLoad >= 1.5) {
-      score -= 4;
+      score += SCORES.health.softPenalty;
     }
   }
 
+  // =========================
+  // DISTRIBUTION PRESSURE
+  // =========================
 
   const delta =
     state.targetHours - state.usedHours;
 
-  const pressure = Math.max(0, delta);
+  const pressure =
+    Math.max(0, delta);
 
-  score += Math.min(3, pressure * 1.2);
-  
+  score += Math.min(
+    SCORES.distribution.pressureCap,
+    pressure *
+    SCORES.distribution.pressureMultiplier
+  );
 
   return score;
 }
@@ -88,93 +216,139 @@ export function scoreIntensity({
 }) {
   let score = 0;
 
-  const pref = preferences.find(p => p.name === category);
-  const base = pref?.intensity || "medium";
-  const analysis = categoryAnalysis?.[category];
+  const pref =
+    preferences.find(p => p.name === category);
 
-  // SLOT FIT BIAS
+  const base =
+    pref?.intensity || "medium";
+
+  const analysis =
+    categoryAnalysis?.[category];
+
+  // =========================
+  // SLOT FIT
+  // =========================
+
   if (slotDuration <= 0.5) {
 
     if (intensity === "low") {
-      score += 4;
+      score += SCORES.slotFit.lowInShortSlot;
     }
 
     if (intensity === "medium") {
-      return -1000;
+      return SCORES.slotFit.mediumInShortSlot;
     }
 
     if (intensity === "high") {
-      return -1000;
+      return SCORES.slotFit.highInShortSlot;
     }
   }
 
   // =========================
-  // USER PREFERENCE BIAS
+  // USER INTENSITY PREFERENCE
   // =========================
+
   if (intensity === base) {
-    score += 3;
+    score += SCORES.intensityPreference.exactMatch;
   }
 
   // =========================
   // ANALYSIS SIGNAL
   // =========================
+
   if (analysis?.recommendedIntensity) {
+
     if (
-      (analysis.recommendedIntensity === "Intense" && intensity === "high") ||
-      (analysis.recommendedIntensity === "Balanced" && intensity === "medium") ||
-      (analysis.recommendedIntensity === "Light" && intensity === "low")
+      analysis.recommendedIntensity === "Intense" &&
+      intensity === "high"
     ) {
-      score += 2.5;
+      score += SCORES.analysis.intenseMatch;
+    }
+
+    if (
+      analysis.recommendedIntensity === "Balanced" &&
+      intensity === "medium"
+    ) {
+      score += SCORES.analysis.balancedMatch;
+    }
+
+    if (
+      analysis.recommendedIntensity === "Light" &&
+      intensity === "low"
+    ) {
+      score += SCORES.analysis.lightMatch;
     }
   }
 
   // =========================
   // FATIGUE PENALTIES
   // =========================
-  if (prevLoad >= 3 && intensity === "high") {
-    score -= 3;
+
+  if (
+    prevLoad >= 3 &&
+    intensity === "high"
+  ) {
+    score += SCORES.fatigue.highAfterHeavy;
   }
 
-  if (prevLoad >= 2 && intensity === "high") {
-    score -= 1.5;
+  if (
+    prevLoad >= 2 &&
+    intensity === "high"
+  ) {
+    score += SCORES.fatigue.highAfterMedium;
   }
 
-  if (prevLoad >= 3 && intensity === "medium") {
-    score -= 1;
+  if (
+    prevLoad >= 3 &&
+    intensity === "medium"
+  ) {
+    score += SCORES.fatigue.mediumAfterHeavy;
   }
 
   // =========================
-  //  CATEGORY STATE INTEGRATION (NEW CORE LOGIC)
+  // REMAINING LOAD LOGIC
   // =========================
-  const state = categoryState?.[category];
+
+  const state =
+    categoryState?.[category];
 
   if (state) {
+
     const remaining =
       state.targetHours - state.usedHours;
 
-    const safeRemaining = Math.max(0, remaining);
+    const safeRemaining =
+      Math.max(0, remaining);
 
-    // intensity "cost profile"
-    const intensityCost =
-      intensity === "high" ? 1.5 :
-      intensity === "medium" ? 1 :
-      0.5;
-
-    // reward using higher intensity when there is room left
-    if (safeRemaining > 3 && intensity === "high") {
-      score += 1.5;
+    // reward high intensity when far behind
+    if (
+      safeRemaining > 3 &&
+      intensity === "high"
+    ) {
+      score +=
+        SCORES.remainingLoad
+          .highIntensityWhenLotsRemaining;
     }
 
-    // discourage high intensity when near completion
-    if (safeRemaining < 2 && intensity === "high") {
-      score -= 2;
+    // discourage high intensity near completion
+    if (
+      safeRemaining < 2 &&
+      intensity === "high"
+    ) {
+      score +=
+        SCORES.remainingLoad
+          .highIntensityNearCompletion;
     }
 
-    // mild preference for efficient fill when behind schedule
-    if (safeRemaining > 4 && intensity === "medium") {
-      score += 0.5;
+    // encourage medium intensity when behind
+    if (
+      safeRemaining > 4 &&
+      intensity === "medium"
+    ) {
+      score +=
+        SCORES.remainingLoad
+          .mediumIntensityWhenBehind;
     }
-
   }
 
   return score;

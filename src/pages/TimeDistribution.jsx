@@ -1,3 +1,10 @@
+/**
+ * Time Distribution Dashboard
+ * 
+ * This component visualises and manages weekly time allocation across categories.
+ * It compares user-defined target distributions against actual task data and
+ * provides interactive editing of category weights.
+ */
 import { useState, useRef, useEffect, useMemo } from "react"
 import { useAppContext } from "../context/AppContext";
 import { PieChart, Pie, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
@@ -8,7 +15,7 @@ const AVAILABLE_CATEGORIES = [
   "Leisure",
   "Work",
 ]
-
+// Maps categories to consistent visual colours for chart rendering
 const CATEGORY_COLORS = {
   Academic: "#6366F1",
   Health: "#10B981",
@@ -18,7 +25,7 @@ const CATEGORY_COLORS = {
 
 export default function TimeDistribution() {
   
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);   
   const [draftCategories, setDraftCategories] = useState([]);
 
   const openDrawer = () => {
@@ -28,6 +35,8 @@ export default function TimeDistribution() {
 
   const { timeDistribution, updateTimeDistribution, getWeeklyActualDistribution, weekLabel } = useAppContext();
   
+  // Normalises time distribution data from backend or defaults to equal distribution
+  // Ensures visual consistency in charts even when no user data exists
   const categories = useMemo(() => {
     const source =
       timeDistribution?.length
@@ -52,12 +61,15 @@ export default function TimeDistribution() {
 
   const target = categories;
 
+  // Retrieves actual time spent per category based on logged tasks for the current week
   const actualRaw = getWeeklyActualDistribution();
-  const actual = actualRaw?.length
+  const actual = actualRaw?.length                      // Ensures chart does not break when no task data exists for the selected week
     ? actualRaw
     : [];
   const hasActual = actual.length > 0;
 
+  // Dynamically adds a new category into the draft distribution editor
+  // prevents duplicates and initialises default weight
   const addCategory = (name) => {
     if (draftCategories.find((c) => c.name === name)) return;
 
@@ -71,13 +83,14 @@ export default function TimeDistribution() {
     ]);
   };
 
+  // Removes category while ensuring at least one category remains
   const removeCategory = (name) => {
     const filtered = draftCategories.filter((c) => c.name !== name);
     if (filtered.length === 0) return;
     setDraftCategories(filtered);
   };
 
-  const updateValue = (index, value) => {
+  const updateValue = (index, value) => {  // Keeps slider and numeric input in sync for category weight adjustment
     const updated = [...draftCategories];
     updated[index] = {
       ...updated[index],
@@ -86,6 +99,8 @@ export default function TimeDistribution() {
     setDraftCategories(updated);
   };
 
+  // Validates that total distribution equals 100% before persisting
+  // ensures proportional integrity of scheduling model
   const handleSave = async () => {
     const total = draftCategories.reduce(
       (sum, c) => sum + c.value,
@@ -147,7 +162,7 @@ export default function TimeDistribution() {
           <div className="h-56">
             <ResponsiveContainer>
               <PieChart>
-                <Pie
+                <Pie                                 // Visualises proportional category distribution using a pie chart representation
                   data={targetWithColors}
                   dataKey="value"
                   nameKey="name"
@@ -216,8 +231,8 @@ export default function TimeDistribution() {
         </h2>
 
         <ResponsiveContainer width="100%" height={300}>
-          <BarChart
-            data={target.map(t => ({
+          <BarChart                // Compares intended vs actual time allocation per category
+            data={target.map(t => ({// highlights imbalance between planning and real execution
               name: t.name,
               target: t.value,
               actual: actual.find(a => a.name === t.name)?.value || 0
@@ -240,7 +255,7 @@ export default function TimeDistribution() {
         Edit Target Distribution
       </button>
 
-      {isDrawerOpen && (
+      {isDrawerOpen && (         // Interactive drawer allows users to adjust category weights in real-time
     <div className="fixed inset-0 z-50">
       
       {/* overlay */}

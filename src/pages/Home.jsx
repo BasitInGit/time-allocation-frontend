@@ -1,3 +1,9 @@
+/**
+ * Home Dashboard Component
+ * Displays a summary of upcoming tasks and reminders.
+ * Uses context-derived data and enriches reminder information
+ * for consistent UI presentation across the dashboard.
+ */
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 
@@ -12,9 +18,13 @@ function Home() {
 
   const {tasks, getUpcomingTasks, getReminderTasks } = useAppContext();
 
+  // Retrieves pre-filtered task data from context
+  // avoids recalculating sorting/filtering inside this component
   const upcomingTasks = getUpcomingTasks();
   const reminders = getReminderTasks();
 
+  // Enriches reminder data with corresponding task details
+  // (title and color) for UI display consistency
   const enrichedReminders = reminders
   .map(rem => {
     const task = tasks.find(t => t.id === rem.taskId);

@@ -1,3 +1,9 @@
+/**
+ * Reminders Module
+ * Handles creation, updating, deletion, and categorisation of reminders.
+ * Includes data enrichment, date-based classification, and optimized lookup structures.
+ */
+
 import { useState, useEffect, useMemo } from "react";
 import { useAppContext } from "../context/AppContext";
 import { useParams } from "react-router-dom";
@@ -21,6 +27,8 @@ function Reminders() {
     frequency: "once",
   });
 
+  // Converts task array into a lookup map for O(1) access by taskId
+  // improves performance when enriching reminders
   const taskMap = useMemo(() => {
     const map = {};
     for (const t of tasks) {
@@ -68,6 +76,8 @@ function Reminders() {
 
   const [recentlySavedId, setRecentlySavedId] = useState(null);
 
+  // Enriches reminder data by joining it with corresponding task information
+  // to provide UI-ready display fields (title, date, etc.)
   const enrichedReminders = useMemo(() => {
     return reminders
       .map((r) => {
@@ -84,6 +94,8 @@ function Reminders() {
       .filter(Boolean);
   }, [reminders, taskMap]);
 
+  // Handles both creation and updating of reminders depending on existence
+  // of an existing reminder for the selected task
   const handleSave = async () => {
     if (!selectedTask) return;
 
@@ -105,8 +117,8 @@ function Reminders() {
 
     setRecentlySavedId(selectedTask.id);
 
-    setTimeout(() => {
-      taskRefs.current[selectedTask.id]?.scrollIntoView({
+    setTimeout(() => {  // Automatically scrolls to updated reminder after saving for user feedback
+      taskRefs.current[selectedTask.id]?.scrollIntoView({   
         behavior: "smooth",
         block: "center",
       });
@@ -141,7 +153,7 @@ function Reminders() {
     }
   };
   
-
+  // Determines whether a reminder time has passed relative to current time
   const isOverdue = (r) => {
     if (!r) return false;
 
@@ -159,7 +171,8 @@ function Reminders() {
     return taskDate === today;
   };
 
-
+  // Categorises reminders into overdue, today, and upcoming groups
+  // based on computed datetime comparisons
   const { overdueReminders, todayReminders, upcomingReminders } = useMemo(() => {
     const overdue = [];
     const today = [];
@@ -182,6 +195,8 @@ function Reminders() {
     };
   }, [enrichedReminders]);
 
+  // Filters tasks by selected date and excludes those already having reminders
+  // ensures only valid selectable tasks are shown
   const filteredTasks = useMemo(() => {
   if (!selectedDate) return [];
 

@@ -1,3 +1,8 @@
+/**
+ * Calendar Component
+ * Implements a custom scheduling engine with collision-aware event layout,
+ * converting time-based tasks into a visual timeline representation.
+ */
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useAppContext } from "../context/AppContext";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -5,9 +10,8 @@ import { getLocalDateStr, normalizeDate } from "../utils/dateUtils";
 import { toHours, toTimeStr, normalizeTime } from "../utils/Scheduler/timeUtils";
 
 function Calendar() {
-
-  // UI STATE
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [selectedDate, setSelectedDate] = useState(
     location.state?.date || getLocalDateStr()
@@ -16,35 +20,40 @@ function Calendar() {
   const [showModal, setShowModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
 
-  const navigate = useNavigate();
   const scrollRef = useRef(null);
+  const layoutRef = useRef([]);
+
   const [showAbove, setShowAbove] = useState(false);
   const [showBelow, setShowBelow] = useState(false);
 
-  
-  
-  // DATA (from context)
-  const { tasks, defaultTask, addTask, updateTask, deleteTask: deleteGlobalTask, reminders, generatedSchedule } = useAppContext();
-  
-  // FORM STATE
-  const [newTask, setNewTask] =  useState(defaultTask);
+  const {
+    tasks,
+    defaultTask,
+    addTask,
+    updateTask,
+    deleteTask: deleteGlobalTask,
+    reminders,
+  } = useAppContext();
 
+  const [newTask, setNewTask] = useState(defaultTask);
 
   const categoryColors = {
-  Academic: "bg-indigo-500",
-  Health: "bg-green-500",
-  Leisure: "bg-yellow-500",
-  Work: "bg-purple-500",
+    Academic: "bg-indigo-500",
+    Health: "bg-green-500",
+    Leisure: "bg-yellow-500",
+    Work: "bg-purple-500",
   };
 
+  // Checks if a reminder exists for a given task
   const hasReminder = (taskId) =>
-  reminders.some(r => r.taskId === taskId);
+    reminders.some((r) => r.taskId === taskId);
 
   const openCreateModal = () => {
     setNewTask({ ...defaultTask, date: selectedDate });
     setShowModal(true);
   };
 
+  // Creates or updates a task depending on whether an ID exists
   const saveTask = async () => {
     const color = categoryColors[newTask.category] || "bg-gray-500";
 
@@ -55,11 +64,8 @@ function Calendar() {
     };
 
     try {
-      if (newTask.id) {
-        await updateTask(taskData);
-      } else {
-        await addTask(taskData);
-      }
+      if (newTask.id) await updateTask(taskData);
+      else await addTask(taskData);
 
       setNewTask(defaultTask);
       setShowModal(false);
@@ -67,64 +73,45 @@ function Calendar() {
       console.error(err);
     }
   };
-  
+
+  // Each hour is mapped to 80px in the UI grid
+  // Converts time string into vertical pixel position
   const getEventTop = (time) => {
     const normalized = normalizeTime(time);
-    if (!normalized) return 0;
-
-    const hours = toHours(normalized);
-    if (hours === null) return 0;
-
-    return hours * 80;
+    const hours = normalized ? toHours(normalized) : null;
+    return hours === null ? 0 : hours * 80;
   };
 
   const getEndTime = (startTime, durationHours) => {
     const normalized = normalizeTime(startTime);
-    if (!normalized) return "";
+    const startHours = normalized ? toHours(normalized) : null;
 
-    const startHours = toHours(normalized);
     if (startHours === null) return "";
 
     const endHours = startHours + Number(durationHours || 0);
-
     return toTimeStr(endHours);
   };
 
   const getEventHeight = (durationHours) => {
     const duration = Number(durationHours);
-
-    if (isNaN(duration) || duration <= 0) return 0;
-
-    return Math.max(duration * 80, 60); // 👈 minimum height
+    if (!duration || duration <= 0) return 0;
+    return Math.max(duration * 80, 60);
   };
 
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-
-    requestAnimationFrame(() => {
-      el.scrollTop = 0;
-      checkVisibleEvents(layoutRef.current);
-    });
-  }, [selectedDate]);
-  
-
+  // Normalises raw task data into a consistent format for calendar rendering
   const normalizeEvent = (e) => {
     const date = normalizeDate(e.date);
-    if (!date) return null; 
+    if (!date) return null;
 
-    let time;
+    const time =
+      typeof e.start === "number"
+        ? toTimeStr(e.start)
+        : normalizeTime(e.time);
 
-    if (typeof e.start === "number") {
-      time = toTimeStr(e.start);
-    } else {
-      time = normalizeTime(e.time);
-    }
-
-    if (!time) return null; 
+    if (!time) return null;
 
     return {
-      id: e.id || `gen-${e.date}-${e.time}-${e.title}`,
+      id: e.id || `task-${date}-${time}-${e.title}`,
       title: e.title || "Untitled",
       date,
       time,
@@ -137,29 +124,28 @@ function Calendar() {
   const layoutEvents = useMemo(() => {
     return tasks
       .map(normalizeEvent)
-      .filter(e => normalizeDate(e.date) === normalizeDate(selectedDate));
+      .filter(Boolean)
+      .filter(
+        (e) => normalizeDate(e.date) === normalizeDate(selectedDate)
+      );
   }, [tasks, selectedDate]);
 
-
+  // Assigns events into non-overlapping visual columns
+  // If two events overlap in time, they are placed in separate columns
+  // This ensures the calendar visually represents concurrent tasks
   const computeEventLayout = (events) => {
-    const enriched = events.map(e => {
+    const enriched = events.map((e) => {
       const top = getEventTop(e.time);
       const height = getEventHeight(e.duration);
 
-      return {
-        ...e,
-        top,
-        height,
-        bottom: top + height,
-      };
+      return { ...e, top, height, bottom: top + height };
     });
 
     const sorted = [...enriched].sort((a, b) => a.top - b.top);
 
     const layout = [];
 
-    for (let i = 0; i < sorted.length; i++) {
-      const current = sorted[i];
+    for (const current of sorted) {
       let col = 0;
 
       while (
@@ -173,17 +159,13 @@ function Calendar() {
         col++;
       }
 
-      layout.push({
-        ...current,
-        column: col,
-      });
+      layout.push({ ...current, column: col });
     }
 
     return layout.map((event) => {
       const overlapping = layout.filter(
         (e) =>
-          e.top < event.bottom &&
-          event.top < e.bottom
+          e.top < event.bottom && event.top < e.bottom
       );
 
       const totalColumns =
@@ -193,33 +175,46 @@ function Calendar() {
     });
   };
 
-  const layout = computeEventLayout(layoutEvents);
-
-  const layoutRef = useRef(layout);
+  // Prevents recalculation of layout unless tasks or selected date changes
+  const layout = useMemo(
+    () => computeEventLayout(layoutEvents),
+    [layoutEvents]
+  );
 
   useEffect(() => {
     layoutRef.current = layout;
   }, [layout]);
 
-  const checkVisibleEvents = (layout) => {
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    requestAnimationFrame(() => {
+      el.scrollTop = 0;
+      checkVisibleEvents(layoutRef.current);
+    });
+  }, [selectedDate]);
+
+  const checkVisibleEvents = (layoutData) => {
     const el = scrollRef.current;
 
-    if (!el || !layout.length) {
+    if (!el || !layoutData?.length) {
       setShowAbove(false);
       setShowBelow(false);
       return;
     }
 
-    const scrollTop = el.scrollTop;
-    const visibleTop = scrollTop;
-    const visibleBottom = scrollTop + el.clientHeight;
+    const visibleTop = el.scrollTop;
+    const visibleBottom = visibleTop + el.clientHeight;
 
+    // Detects whether events exist outside visible scroll area
+    // Used to show "More above/below" indicators
     let above = false;
     let below = false;
 
-    for (const e of layout) {
-      if (e.bottom <= visibleTop + 1) above = true;
-      if (e.top >= visibleBottom - 1) below = true;
+    for (const e of layoutData) {
+      if (e.bottom <= visibleTop) above = true;
+      if (e.top >= visibleBottom) below = true;
     }
 
     setShowAbove(above);
@@ -232,16 +227,7 @@ function Calendar() {
   };
 
   const editTask = (task) => {
-    setNewTask({
-      id: task.id,
-      title: task.title,
-      category: task.category,
-      date: task.date,
-      time: task.time,
-      duration: task.duration,
-      details: task.details || "",
-    });
-
+    setNewTask(task);
     setSelectedTask(null);
     setShowModal(true);
   };
@@ -250,6 +236,7 @@ function Calendar() {
     normalizeDate(newTask.date) &&
     normalizeTime(newTask.time) &&
     Number(newTask.duration) > 0;
+
 
   return (
     <div className="flex-1 p-6 overflow-y-auto">

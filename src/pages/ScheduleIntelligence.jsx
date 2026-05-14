@@ -1,3 +1,12 @@
+/**
+ * Schedule Generation Module
+ * 
+ * This component implements a constraint-based scheduling system that:
+ * - Integrates user preferences and category priorities
+ * - Uses deadline analysis to adjust workload distribution
+ * - Applies target-vs-actual time distribution balancing
+ * - Converts generated schedules into persistent task entities
+ */
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { generateSchedule } from "../utils/Scheduler/schedulerEngine";
@@ -55,10 +64,15 @@ export default function Generate() {
     }
   }, [schedulePreferences]);
 
+  // Provides contextual deadline pressure analysis per category
+  // used to guide scheduling decisions
   const analysisByCategory = selectedDate
     ? analyzeDeadlineLoadByCategory(deadlines, selectedDate)
     : {};
 
+
+  // Updates user-defined scheduling preferences per category
+  // used as soft constraints in scheduling engine
   const updatePreference = (index, field, value) => {
     const updated = [...draftPreferences];
     updated[index] = {
@@ -71,7 +85,7 @@ export default function Generate() {
   const canSave = selectedDate && draftPreferences.length > 0;
 
   const handleSavePreferences = () => {
-    setSchedulePreferences(draftPreferences);
+    setSchedulePreferences(draftPreferences);               // Stores user preferences for future scheduling sessions
 
     setSavedMessage(true);
 
@@ -86,12 +100,16 @@ export default function Generate() {
   const [savedMessage, setSavedMessage] = useState(false);
 
   // ================= GENERATE =================
+
+  // Core scheduling pipeline:
+  // validates inputs, builds constraints, calls scheduling engine,
+  // converts output into persistent task objects
   const handleGenerate = async () => {
     if (
       !selectedDate ||
       !startTime ||
       !endTime ||
-      toMinutes(endTime) <= toMinutes(startTime)
+      toMinutes(endTime) <= toMinutes(startTime)             // Converts time strings into numeric values for comparison
     ) {
       alert("Please select valid date and time range");
       return;
@@ -99,12 +117,16 @@ export default function Generate() {
 
     setLoading(true);
 
+    // Filters existing tasks for selected date to avoid overwriting or duplication
+    // when generating new schedule entries
     const existingTasks = useExisting
       ? tasks.filter(t =>normalizeDate(t.date) === normalizeDate(selectedDate))
       : [];
 
     let distribution = [];
 
+    // Computes category pressure based on difference between target vs actual weekly distribution
+    // used to bias schedule generation towards underrepresented categories
     if (useTargetDistribution && selectedDate) {
       const actual = getActualWeeklyDistribution2(tasks, selectedDate);
 
@@ -119,7 +141,8 @@ export default function Generate() {
         };
       });
        
-      // clamp negatives
+      // Normalises category weights by removing negative values
+      // ensures only unmet category demand influences scheduling
       const clamped = rawDistribution.map(d => ({
         ...d,
         delta: Math.max(0, d.delta),
@@ -130,9 +153,12 @@ export default function Generate() {
       distribution = clamped.map(d => ({
         category: d.category,
         pressure: totalDelta > 0 ? d.delta / totalDelta : 0,
-      }));
-    }
+      }));   // Converts raw category imbalance into probability weights
+    }            // used by scheduler engine for prioritisation
+    
 
+    // Delegates schedule creation to external constraint-based scheduling engine
+    // passing preferences, deadlines, and distribution constraints
     const schedule = generateSchedule({
       date: selectedDate,
       startTime,
@@ -146,6 +172,9 @@ export default function Generate() {
 
     console.log("RAW SCHEDULE:", schedule);
 
+
+    // Transforms raw scheduler output into application task schema
+    // standardises formatting for persistence and UI rendering
     const generatedTasks = schedule.map((t, i) => ({
       id: `gen-${i}-${selectedDate}-${t.start}`,
       title: t.name,
@@ -157,13 +186,11 @@ export default function Generate() {
       generated: true,
     }));
     
+    // Persists generated schedule tasks to backend storage sequentially
+    // ensuring API consistency per task
     for (const task of generatedTasks) {
       await addTask(task);
     }
-
-    console.log("SCHEDULE OUTPUT:", schedule);
-    console.log("ANALYSIS:", analysisByCategory);
-    console.log(getLocalDateStr());
 
     setLoading(false);
     navigate("/calendar", {

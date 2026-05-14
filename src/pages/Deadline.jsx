@@ -1,3 +1,8 @@
+/**
+ * Deadlines module
+ * Manages creation, editing, deletion, and categorisation of deadlines.
+ * Includes rule-based classification (overdue/upcoming) and optimized rendering using memoization.
+ */
 import { useState, useRef,useMemo  } from "react";
 import { useAppContext } from "../context/AppContext";
 import { normalizeDate, getLocalDateStr, buildDateTime } from "../utils/dateUtils";
@@ -45,6 +50,9 @@ function Deadlines() {
   };
 
   // ================= SAVE =================
+
+  // Handles both creation and updating of deadlines
+  // based on whether a deadline is currently selected
   const handleSave = async () => {
     if (!form.title || !form.date) return;
 
@@ -113,18 +121,26 @@ function Deadlines() {
     }
   };
 
+  
   // ================= GROUPING =================
+
+  // Determines whether a deadline has passed by comparing current time
+  // with either full datetime or date-only fallback
 const isOverdue = (d) => {
   const now = new Date();
   const due = buildDateTime(d.date, d.time);
   return due ? due < now : normalizeDate(d.date) < normalizeDate(now);
 };
 
-  const overdueSet = useMemo(
+// Creates a Set for fast lookup of overdue deadlines
+// improves rendering performance in list mapping
+const overdueSet = useMemo(
   () => new Set(deadlines.filter(isOverdue).map(d => d.id)),
   [deadlines]
 );
 
+// Splits deadlines into overdue and upcoming categories
+// to avoid recalculating grouping on every render
 const { overdue, upcoming } = useMemo(() => {
   const overdue = [];
   const upcoming = [];
@@ -137,6 +153,9 @@ const { overdue, upcoming } = useMemo(() => {
 }, [deadlines]);
 
   // ================= SECTION =================
+
+  // Reusable UI component for rendering grouped deadline lists
+  // Supports filtering and conditional styling (overdue, saved, normal)
   const DeadlineSection = ({ title, items, color, filter }) => {
     const filteredItems = filter ? items.filter(filter) : items;
     if (!filteredItems.length) return null;

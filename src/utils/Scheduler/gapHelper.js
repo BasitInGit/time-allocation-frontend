@@ -21,7 +21,19 @@ export const GAP_RULES = {
     { min: 2.5, max: Infinity, gap: 1.5 },
   ],
 };
-
+/**
+ * Gap Rule Engine
+ *
+ * Determines rest/break duration based on accumulated workload
+ * and time-of-day context.
+ *
+ * Purpose:
+ * - Prevent continuous overloading
+ * - Introduce natural breaks into schedule
+ * - Adjust recovery time dynamically depending on fatigue level
+ *
+ * Output: gap duration in hours
+ */
 export function getGap(prevLoad, timeOfDay) {
   const rules = GAP_RULES[timeOfDay];
 

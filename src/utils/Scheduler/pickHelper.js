@@ -1,3 +1,17 @@
+/**
+ * Candidate Selection Engine
+ *
+ * Chooses the best (category + intensity) pair for the next task slot.
+ *
+ * Decision is based on:
+ * - Category pressure (remaining workload vs target)
+ * - User preferences (time-of-day + intensity)
+ * - Fatigue and recent workload patterns
+ * - Anti-repetition rules (awBuffer, lastCategory)
+ * - Special constraints (health load, gap recovery)
+ *
+ * It evaluates all combinations and returns the highest-scoring candidate.
+ */
 import { scoreCategory, scoreIntensity } from "./scoreHelper";
 
 export function pickCandidate({

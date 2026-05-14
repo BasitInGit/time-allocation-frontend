@@ -1,3 +1,17 @@
+/**
+ * Timeline Builder
+ *
+ * Converts a day into structured time blocks:
+ * - Fixed blocks: existing tasks
+ * - Free blocks: available scheduling windows
+ *
+ * Steps:
+ * - Merge overlapping existing tasks
+ * - Sort by time
+ * - Split day into alternating free/fixed segments
+ *
+ * Output is used as the foundation for scheduling.
+ */
 import { toHours, toTimeStr } from "./timeUtils";
 import { normalizeDate } from "../dateUtils";;
 

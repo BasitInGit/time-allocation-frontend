@@ -1,3 +1,16 @@
+/**
+ * Task Library
+ *
+ * Defines available task templates grouped by:
+ * - Category (Academic, Work, Health, Leisure)
+ * - Intensity (Light, Balanced, Intense)
+ *
+ * Each task defines:
+ * - Human-readable name
+ * - Estimated duration
+ *
+ * Used by the scheduler to instantiate real scheduled blocks.
+ */
 export const TASK_LIBRARY = {
   Academic: {
   Light: [
@@ -91,7 +104,19 @@ export const TASK_LIBRARY = {
     ]
   }
 };
-
+/**
+ * Task Selection Engine
+ *
+ * Selects a concrete task from the task library based on:
+ * - Category + intensity
+ * - Available time slot duration
+ * - Last executed task (prevents repetition)
+ *
+ * Behavior:
+ * - Filters tasks that fit within remaining time
+ * - Avoids repeating the same task consecutively
+ * - Randomly selects from valid candidates for variation
+ */
 export function pickTask({
   category,
   intensity,

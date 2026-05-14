@@ -1,28 +1,40 @@
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
-import { useState } from "react";
-import { FiMenu, FiHome, FiCalendar, FiSettings, FiZap, FiBarChart,
-  FiUser, FiBell } from "react-icons/fi";
+import { useState, useMemo } from "react";
+import {
+  FiMenu,
+  FiHome,
+  FiCalendar,
+  FiSettings,
+  FiZap,
+  FiBarChart,
+  FiBell,
+} from "react-icons/fi";
 
 function Layout() {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
-  const navItems = [
+  const navItems = useMemo(() => [
     { name: "Home", path: "/", icon: <FiHome /> },
-    { name: "Calendar", path: "/calendar", icon: <FiCalendar />, },
+    { name: "Calendar", path: "/calendar", icon: <FiCalendar /> },
     { name: "Generate", path: "/schedulePage", icon: <FiZap /> },
     { name: "Settings", path: "/settings", icon: <FiSettings /> },
     { name: "Analytics", path: "/analytics", icon: <FiBarChart /> },
     { name: "Reminders", path: "/reminderPage", icon: <FiBell /> },
     { name: "Deadline", path: "/deadline", icon: <FiBell /> },
-  ];
+  ], []);
+
+  const isActiveRoute = (path) => {
+    if (path === "/") return location.pathname === "/";
+    return location.pathname.startsWith(path);
+  };
 
   return (
     <div className="flex h-screen overflow-hidden">
 
       {/* Sidebar */}
-      <div
+      <aside
         className={`bg-white shadow-md flex flex-col transition-all duration-300 ${
           collapsed ? "w-20" : "w-64"
         }`}
@@ -31,7 +43,10 @@ function Layout() {
         <div className="flex items-center justify-between p-4">
           {!collapsed && <h1 className="text-lg font-bold">Planner</h1>}
 
-          <button onClick={() => setCollapsed(!collapsed)}>
+          <button
+            onClick={() => setCollapsed(prev => !prev)}
+            aria-label="Toggle sidebar"
+          >
             <FiMenu size={20} />
           </button>
         </div>
@@ -39,13 +54,13 @@ function Layout() {
         {/* Nav */}
         <nav className="flex-1 space-y-2 px-2">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.path;
+            const isActive = isActiveRoute(item.path);
 
             return (
               <button
                 key={item.name}
                 onClick={() => navigate(item.path)}
-                title={collapsed ? item.name : ""}
+                title={collapsed ? item.name : undefined}
                 className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg transition ${
                   isActive
                     ? "bg-indigo-100 text-indigo-700"
@@ -63,12 +78,12 @@ function Layout() {
             );
           })}
         </nav>
-      </div>
+      </aside>
 
       {/* Main content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto p-6">
         <Outlet />
-      </div>
+      </main>
     </div>
   );
 }
